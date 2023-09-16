@@ -1,0 +1,36 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+
+def extract_ages(df):
+    """Extract ages based on population."""
+    ages = df['Age'].values
+    populations = df['Population'].values
+    all_ages = []
+    for age, pop in zip(ages, populations):
+        all_ages.extend([age] * pop)
+    return all_ages
+
+# 1. Read the CSV files
+file_path1 = 'age_csv_file2008.csv'
+file_path2 = 'age_csv_file2022.csv'
+df1 = pd.read_csv(file_path1)
+df2 = pd.read_csv(file_path2)
+
+# 2. Extract age data from both datasets
+all_ages1 = extract_ages(df1)
+all_ages2 = extract_ages(df2)
+
+# 3. Visualize the data in 5-year intervals
+bin_edges = list(range(0, 105, 5))  # Assuming the max age is 100, adjust if needed.
+
+plt.hist([all_ages1, all_ages2], bins=bin_edges, edgecolor="k", alpha=0.7, label=['Dataset 1', 'Dataset 2'])
+
+plt.title('Population Distribution in 5-year Intervals')
+plt.xlabel('Age')
+plt.ylabel('Population')
+plt.xticks(bin_edges)
+plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+plt.legend(loc='upper right')
+plt.tight_layout()
+
+plt.show()
