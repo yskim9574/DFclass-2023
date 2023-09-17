@@ -1,0 +1,35 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_squared_error
+
+# 1. Load the dataset
+data = pd.read_csv('boston.csv')
+
+# Assuming 'MEDV' is the column name for the target variable
+X = data.drop('MEDV', axis=1).values
+y = data['MEDV'].values
+
+# 2. Split the dataset into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# 3. Standardize the data
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+
+# 4. Train the Ridge Regression model
+ridge_reg = Ridge(alpha=1.0)  # you can tune the alpha value
+ridge_reg.fit(X_train, y_train)
+
+# 5. Evaluate the Model
+y_pred = ridge_reg.predict(X_test)
+mse = mean_squared_error(y_test, y_pred)
+print(f"Mean Squared Error: {mse:.2f}")
+
+# 6. Inspect the Coefficients
+feature_names = data.drop('MEDV', axis=1).columns
+print("\nFeature coefficients:")
+for feature_name, coef in zip(feature_names, ridge_reg.coef_):
+    print(f"{feature_name}: {coef:.4f}")
