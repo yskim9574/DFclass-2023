@@ -1,0 +1,21 @@
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Load the dataset
+data = pd.read_csv('diabetes.csv')
+
+# Compute the correlation matrix
+corr = data.corr()
+
+# Set up the matplotlib figure
+f, ax = plt.subplots(figsize=(7, 5 ))
+
+# Generate a custom diverging colormap
+cmap = sns.diverging_palette(220, 10, as_cmap=True)
+
+# Draw the heatmap
+sns.heatmap(corr, cmap=cmap, vmax=.3, center=0, annot=True,
+            square=True, linewidths=.5, cbar_kws={"shrink": .5})
+
+plt.show()
