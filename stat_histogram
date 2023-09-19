@@ -1,0 +1,28 @@
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.interpolate import CubicSpline
+
+# Define the height ranges and probabilities
+height_ranges = [(149.0, 156.2), (156.2, 161.9), (161.9, 167.6), (167.6, 173.3), (173.3, 179.0), (179.0, 184.7), (184.7, 190.4), (190.4, 196.2)]
+probabilities = [0.135, 2.145, 13.59, 34.13, 34.14, 13.59, 2.145, 0.135]
+# Calculate the midpoints of each height range for plotting
+midpoints = [(start + end) / 2 for start, end in height_ranges]
+# Calculate the mean and standard deviation
+mean = np.average(midpoints, weights=probabilities)
+std_dev = np.sqrt(np.average((midpoints - mean)**2, weights=probabilities))
+# Cubic spline interpolation for a smooth curve
+cs = CubicSpline(midpoints, probabilities)
+xs = np.linspace(min(midpoints), max(midpoints), 1000)
+# Plot the histogram
+plt.bar(midpoints, probabilities, width=np.diff([start for start, _ in height_ranges]).min(), align='center', alpha=0.5, label="Histogram")
+# Plot the PDF using cubic spline interpolation
+plt.plot(xs, cs(xs), 'r--', label='Interpolated PDF')
+# Plot mean and standard deviation lines
+plt.axvline(mean, color='g', linestyle='dashed', linewidth=1, label=f'Mean: {mean:.2f}')
+plt.axvline(mean + std_dev, color='y', linestyle='dashed', linewidth=1, label=f'Standard Deviation: ±{std_dev:.2f}')
+plt.axvline(mean - std_dev, color='y', linestyle='dashed', linewidth=1)
+plt.xlabel('Height')
+plt.ylabel('Probability')
+plt.title('Height Distribution')
+plt.legend()
+plt.show()
