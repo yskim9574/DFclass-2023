@@ -1,0 +1,27 @@
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
+# Kaggle에서 다운로드한 데이터.
+df = pd.read_csv('diabetes.csv')
+# Outcome이 0인 행을 제거
+df = df[df['Outcome'] != 0]
+# BMI과 Glucose에 대한 선형 회귀 분석.
+X1 = df[['BMI']]
+y = df['Glucose']
+reg1 = LinearRegression().fit(X1, y)
+# Age와 Glucose에 대한 선형 회귀 분석.
+X2 = df[['Age']]
+reg2 = LinearRegression().fit(X2, y)
+# 회귀 계수(regression coefficients)를 출력
+print(f"BMI 회귀 계수: {reg1.coef_}")
+print(f"Age 회귀 계수: {reg2.coef_}")
+# 데이터와 회귀선을 그려 분석한다.
+plt.scatter(X1, y, color='blue', label='BMI')
+plt.scatter(X2, y, facecolor='none', edgecolor='red', label='Glucose')
+plt.plot(X1, reg1.predict(X1), color='blue', linewidth=3)
+plt.plot(X2, reg2.predict(X2), color='red', linewidth=1)
+plt.xlabel('parameter')
+plt.ylabel('Glucose')
+plt.legend()
+plt.show()
