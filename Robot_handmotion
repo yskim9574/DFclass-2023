@@ -1,0 +1,70 @@
+import math
+
+# Function to calculate the inverse kinematics of a two-link robot arm
+def inverse_kinematics(x, y, link1_length, link2_length):
+    # Check if the desired position is within the reachable workspace
+    max_reachable_distance = link1_length + link2_length
+    position_distance = math.sqrt(x**2 + y**2)
+    if position_distance > max_reachable_distance:
+        raise ValueError("Desired position is outside the reachable workspace of the robot arm.")
+    
+    # Calculate theta2 using the law of cosines
+    cos_theta2 = (x**2 + y**2 - link1_length**2 - link2_length**2) / (2 * link1_length * link2_length)
+    # Check if theta2 is within the valid range
+    if cos_theta2 < -1 or cos_theta2 > 1:
+        raise ValueError("Desired position is not achievable with the given arm lengths.")
+    
+    theta2 = math.acos(cos_theta2)
+    
+    # Calculate theta1 using trigonometry
+    sin_theta1 = (link1_length + link2_length * cos_theta2) * y - link2_length * math.sin(theta2) * x
+    cos_theta1 = (link1_length + link2_length * cos_theta2) * x + link2_length * math.sin(theta2) * y
+    theta1 = math.atan2(sin_theta1, cos_theta1)
+    
+    return theta1, theta2
+
+# Main program
+if __name__ == "__main__":
+    # Position A
+    x_a = 1.7
+    y_a = 0.0
+    
+    # Position B
+    x_b = 1.5
+    y_b = 0.7
+    
+    # Position C
+    x_c = 0.2
+    y_c = 1.7
+
+    # Length of robot arm links
+    link1_length = 1.0
+    link2_length = 1.5
+    
+    try:
+        # Calculate joint angles for position A
+        theta1_a, theta2_a = inverse_kinematics(x_a, y_a, link1_length, link2_length)
+        
+        # Calculate joint angles for position B
+        theta1_b, theta2_b = inverse_kinematics(x_b, y_b, link1_length, link2_length)
+        
+        # Calculate joint angles for position C
+        theta1_c, theta2_c = inverse_kinematics(x_c, y_c, link1_length, link2_length)
+
+
+        # Display the results
+        print("Joint angles for Position A:")
+        print("Theta 1:","%.2f" % math.degrees(theta1_a))
+        print("Theta 2:","%.2f" % math.degrees(theta2_a))
+      
+        
+        print("\nJoint angles for Position B:")
+        print("Theta 1:", "%.2f" % math.degrees(theta1_b))
+        print("Theta 2:", "%.2f" % math.degrees(theta2_b))
+
+        print("\nJoint angles for Position C:")
+        print("Theta 1:","%.2f" % math.degrees(theta1_c))
+        print("Theta 2:","%.2f" % math.degrees(theta2_c))
+
+    except ValueError as e:
+        print("Error:", str(e))
