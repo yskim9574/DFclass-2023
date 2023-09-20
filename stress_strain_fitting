@@ -1,0 +1,34 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from scipy.optimize import curve_fit
+from sklearn.metrics import mean_squared_error
+from math import sqrt  
+
+# Define the function form for the stress-strain relationship
+def specific_function(strain, c1, c2, c3):
+   return c1*(c2+strain)**c3
+# Read data from CSV file
+df = pd.read_csv('sscurve_csv_file.csv')
+# Extract data for strain and stress
+strain = df.iloc[:, 0].to_numpy()
+stress = df.iloc[:, 1].to_numpy()
+# extracting all the values in the first column of the DataFrame df and storing them as a NumPy array in the variable strain.
+# Fit the curve
+params, covariance = curve_fit(specific_function, strain, stress)
+# Extract optimal parameters
+c1, c2, c3 = params
+print(f"Optimal parameters: c1 = {c1}, c2 = {c2}, c3 = {c3}")
+
+# Generate curve using the fitted parameters
+fit_stress = specific_function(strain, c1, c2, c3)
+# Calculate Root Mean Square Error
+rmse = sqrt(mean_squared_error(stress, fit_stress))
+print(f"Root Mean Square Error: {rmse}")
+# Plot the data and the fitted curve
+plt.scatter(strain, stress, label='Data', color='blue')
+plt.plot(strain, fit_stress, label=f'Fitted curve (RMSE: {rmse:.4f})', color='red')
+plt.xlabel('Strain')
+plt.ylabel('Stress')
+plt.legend()
+plt.show()
