@@ -1,0 +1,32 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Load the dataset
+df = pd.read_csv('iot_sensor_data.csv')
+# Show the first 5 rows of the DataFrame
+print(df.columns)
+print(df.head())
+# Get summary statistics
+print(df.describe())
+# Remove rows with missing 'Temperature' or 'Humidity' values
+df = df.dropna(subset=['Temperature', 'Humidity'])
+# Calculate the average temperature by sensor ID
+avg_temp_sensor = df.groupby('SensorID')['Temperature'].mean()
+print("Average temperature by sensor ID:")
+print(avg_temp_sensor)
+# Calculate the average humidity by sensor ID
+avg_humidity_sensor = df.groupby('SensorID')['Humidity'].mean()
+print("Average humidity by sensor ID:")
+print(avg_humidity_sensor)
+# Plot the average temperature by sensor ID
+avg_temp_sensor.plot(kind='bar')
+plt.xlabel('SensorID')
+plt.ylabel('Average Temperature')
+plt.title('Average Temperature by Sensor ID')
+plt.show()
+# Plot the average humidity by sensor ID
+avg_humidity_sensor.plot(kind='bar')
+plt.xlabel('SensorID')
+plt.ylabel('Average Humidity')
+plt.title('Average Humidity by Sensor ID')
+plt.show()
