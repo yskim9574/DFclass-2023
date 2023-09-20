@@ -1,0 +1,27 @@
+import numpy as np
+from scipy import stats
+# Sample data
+before = np.array([15.5, 14.2, 13.6, 14.9, 15.8])
+after = np.array([14.8, 13.9, 13.1, 14.0, 15.2])
+# Number of pairs
+n = len(before)
+# Differences
+D = before - after
+# Mean of differences
+mean_D = np.mean(D)
+# Standard deviation of differences
+std_D = np.std(D, ddof=1)
+# t-statistic
+t_statistic = mean_D / (std_D / np.sqrt(n))
+# Degrees of freedom
+df = n - 1
+
+# p-value
+p_value = 2 * (1 - stats.t.cdf(np.abs(t_statistic), df))
+print(f"t-statistic: {t_statistic}")
+print(f"p-value: {p_value}")
+# Check against significance level (let's assume 0.05 with 95% confidence level)
+if p_value <0.05:
+  print("Reject the null hypothesis, suggesting the training program had an effect.")
+else:
+  print("Fail to reject the null hypothesis, suggesting the training program did not have a significant effect.")
