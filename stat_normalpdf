@@ -1,0 +1,51 @@
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.stats import norm
+
+# Data
+height_ranges = [(149.0, 156.2), (156.2, 161.9), (161.9, 167.6), (167.6, 173.3), (173.3, 179.0), (179.0, 184.7), (184.7, 190.4), (190.4, 196.2)]
+probabilities = [0.135, 2.145, 13.59, 34.13, 34.14, 13.59, 2.145, 0.135]
+midpoints = [(start + end) / 2 for start, end in height_ranges]
+
+# Calculate the mean and standard deviation
+mean = np.average(midpoints, weights=probabilities)
+std_dev = np.sqrt(np.average((midpoints - mean)**2, weights=probabilities))
+
+# Convert height midpoints to Z-scores
+z_midpoints = [(x - mean) / std_dev for x in midpoints]
+
+# Convert height ranges to Z-score ranges
+z_ranges = [(x - mean) / std_dev for sublist in height_ranges for x in sublist]
+z_ranges = list(zip(z_ranges[::2], z_ranges[1::2]))
+
+# Convert height 180 to its Z-score
+z_180 = (180 - mean) / std_dev
+
+# Generate Z-score values and their corresponding PDF values
+z_values = np.linspace(-4, 4, 1000)
+pdf_values = norm.pdf(z_values)
+
+# Plot Z-score PDF
+plt.plot(z_values, pdf_values, label='Z-score PDF')
+
+# Adjust probabilities by dividing by 10
+adjusted_probabilities = [p/100 for p in probabilities]
+
+# Plot histogram using Z-scores and adjusted probabilities
+z_widths = [end - start for start, end in z_ranges]
+plt.bar(z_midpoints, adjusted_probabilities, width=z_widths, alpha=0.5, label="Histogram", edgecolor="k", align="center")
+
+# Shade the area under the curve starting from z_180
+plt.fill_between(z_values, pdf_values, where=z_values >= z_180, color='gray', hatch='/', alpha=0.5)
+
+# Calculate and display the value of the hatched area
+hatched_area_value = 1 - norm.cdf(z_180)
+plt.text(2.5, 0.3, f"Hatched Area: {hatched_area_value:.4f}", fontsize=10, bbox=dict(facecolor='white'))
+
+plt.title('Z-score Probability Density Function')
+plt.xlabel('Z-score')
+plt.ylabel('Probability Density')
+plt.ylim(0, 0.5)
+plt.legend()
+plt.grid(True)
+plt.show()
