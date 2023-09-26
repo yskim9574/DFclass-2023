@@ -1,0 +1,29 @@
+//온도 와 습도를 동시에 측정
+
+#include "DHT.h"
+#define DHTPIN 2     
+
+#define DHTTYPE DHT11   
+DHT dht(DHTPIN, DHTTYPE);
+
+void setup() 
+{
+  Serial.begin(9600);
+  Serial.println("temp, Humi");
+
+  dht.begin();
+}
+
+void loop() 
+{
+  delay(2000);
+  int temp = (int)dht.readTemperature();
+  int humi = (int)dht.readHumidity();
+
+  Serial.print("Humidity: ");
+  Serial.print(humi); 
+  Serial.print(" %  ");
+  Serial.println(" Temperature: ");
+  Serial.print(temp);
+  Serial.println("C  ");
+ }
