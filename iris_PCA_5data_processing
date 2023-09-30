@@ -1,0 +1,40 @@
+from sklearn.datasets import load_iris
+import numpy as np
+
+# Load the dataset
+iris = load_iris()
+X = iris.data[:5]  # Selecting the first 5 data points
+print("Data:")
+print(X)
+
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X_std = scaler.fit_transform(X)
+print("\nStandardized Data:")
+print(X_std)
+
+covariance_matrix = np.cov(X_std, rowvar=False)
+print("\nCovariance Matrix:")
+print(covariance_matrix)
+
+eigenvalues, eigenvectors = np.linalg.eig(covariance_matrix)
+print("\nEigenvalues:")
+print(eigenvalues)
+print("\nEigenvectors:")
+print(eigenvectors)
+
+sorted_index = np.argsort(eigenvalues)[::-1]
+sorted_eigenvalues = eigenvalues[sorted_index]
+sorted_eigenvectors = eigenvectors[:, sorted_index]
+print("\nSorted Eigenvalues:")
+print(sorted_eigenvalues)
+print("\nCorresponding Eigenvectors:")
+print(sorted_eigenvectors)
+
+principal_components = sorted_eigenvectors[:, :2]
+print("\nPrincipal Components:")
+print(principal_components)
+
+X_pca = np.dot(X_std, principal_components)
+print("\nProjected Data:")
+print(X_pca)
