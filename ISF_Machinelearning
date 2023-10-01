@@ -1,0 +1,23 @@
+from sklearn import svm
+import numpy as np
+
+# Given training data and labels
+train_data = np.array([[1, 0.666, 0.666, 0.333], [0.8, 0.666, 0.333, 0.333],
+                       [0.8, 0.333, 1, 0.666], [1, 0.666, 1, 0.666], 
+                       [0.6, 0.666, 0.666, 0.333]])
+
+train_label = np.array([0.9819, 0.9975, 0.9857, 0.9799, 1])
+
+# Given test data
+test_data = np.array([[0.8, 1, 0.666, 1]])
+
+# Create an SVR model with a linear kernel
+model = svm.SVR(kernel='linear')
+
+# Train the model
+model.fit(train_data, train_label)
+
+# Predict the label for the test data
+test_label = model.predict(test_data)
+
+print(f"The predicted label for test data {test_data[0]} is {test_label[0]:.4f}")
