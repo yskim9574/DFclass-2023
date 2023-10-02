@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 iris=load_iris()
 columns=['sepal_length','sepal_width','petal_length','petal_width']
 df_iris=pd.DataFrame(iris.data,columns=columns)
+#판다스에서는 표 데이터를 DataFrame 형으로 읽어들임
+#1차원 데이터는 Series 형으로 읽어들임
 df_iris['target']=iris.target
 df_iris.head()
 
