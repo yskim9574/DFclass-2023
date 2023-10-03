@@ -1,0 +1,17 @@
+import pandas as pd
+
+df=pd.read_csv('iris_mod.csv')
+print(df.head(10))
+print()
+
+#from sklearn.linear_model import LinearRegression
+
+condition = df['sepal.length'].isnull()
+non_data = df.loc[condition]
+print(non_data)
+
+x = non_data.loc[:,'sepal.width':'petal.width']
+pred = model.predict(x)
+df.loc[condition, 'sepal.length'] = pred  
+# Removed extra space in column name
+print(pred)
