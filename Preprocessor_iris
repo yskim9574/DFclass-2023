@@ -1,0 +1,39 @@
+import pandas as pd
+df=pd.read_csv('iris_mod.csv')
+print(df.head(10))
+print()
+
+print(df['species'].unique())
+print()
+
+print(df['species'].value_counts())
+print()
+
+print(df.isnull()) 
+print(df.isnull().sum())
+#Check for missing values using isnull()
+print()
+
+df2=df.dropna(how='any',axis=0)
+#delete the low having missing value
+print(df2.head(10))
+print()
+
+print(df.isnull().any(axis=0))
+#list up the column having missing value
+
+df['sepal.length']=df['sepal.length'].fillna(0)
+#replace the missing value with 0-value
+print(df.head(10))
+print()
+
+print(df.mean())
+print()
+
+df=pd.read_csv('iris_mod.csv')
+colmean=df.mean()
+df2=df.fillna(colmean)
+#replace the missing value with a mean value of the column
+print(df2.head(10))
+
+df2.isnull().any(axis=0)
