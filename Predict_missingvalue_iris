@@ -5,7 +5,8 @@ df=pd.read_csv('iris_mod.csv')
 print(df.head(11))
 print()
 
-df2=df.dropna()
+#df2=df.dropna()
+df2=df.fillna(df.mean())
 print(df2.head(10))
 print()
 
