@@ -9,10 +9,6 @@ df2=df.dropna()
 print(df2.head(10))
 print()
 
-#df['sepal.length']=df['sepal.length'].fillna(0)
-#print(df.head(11))
-#print()
-
 x=df2.loc[:,'sepal.width':'petal.width']
 t=df2['sepal.length']
 model=LinearRegression()
