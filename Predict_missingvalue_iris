@@ -9,10 +9,10 @@ df2=df.dropna()
 print(df2.head(10))
 print()
 
-x=df2.loc[:,'sepal.width':'petal.width']
-t=df2['sepal.length']
+x_train=df2.loc[:,'sepal.width':'petal.width']
+y-train=df2['sepal.length']
 model=LinearRegression()
-model.fit(x,t)
+model.fit(x_train,y_train)
 
 condition=df['sepal.length'].isnull()
 df3=df.loc[condition]
