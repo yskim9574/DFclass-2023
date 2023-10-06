@@ -1,0 +1,38 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
+
+# Load the dataset
+df = pd.read_csv('boston.csv')
+print(df.head())
+
+X = df.drop('MEDV', axis=1)
+y = df['MEDV']
+
+# Split the dataset into a training set and a testing set
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+print(f"Number of training samples: {X_train.shape[0]}")
+print(f"Number of test samples: {X_test.shape[0]}")
+
+# Create a Linear Regression model and train it on the training data
+model = LinearRegression()
+model.fit(X_train, y_train)
+
+# Use the trained model to predict the prices in the testing set
+pred = model.predict(X_test)
+print(X_test)
+print()
+
+# Print the predictions and compare with the real value for the first few row
+print(y_test[:5])
+print(pred[:5])
+
+# If you want to visualize the predictions against the actual prices, you can use matplotlib
+plt.scatter(y_test, pred)
+plt.xlabel("Actual Prices")
+plt.ylabel("Predicted Prices")
+plt.title("Actual Prices vs Predicted Prices")
+plt.show()  
