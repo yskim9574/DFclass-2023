@@ -33,7 +33,7 @@ model = Sequential([
 # Compile the model
 model.compile(optimizer='adam', loss='mse')  # mean squared error loss function 
 
-# Train the model
+# Train the model with mini-batch gradient descent method, batch_size=32 means 32 samples(or records/rows) 
 history=model.fit(X_train, y_train, epochs=100, batch_size=32, validation_split=0.1, verbose=1)
 
 # Predict house prices using the testing set
