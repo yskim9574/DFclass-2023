@@ -1,0 +1,37 @@
+from numpy import exp, array, random, dot
+training_inputs = array([[0, 0, 1], [1, 1, 1], [1, 0, 1], [0, 1, 1]])
+target_outputs = array([[0, 1, 1, 0]]).T
+alpha=0.05
+
+# training_inputs는 train_data, target_outputs는 train_label로도 기술됨. 
+# Seed the random number generator: 가중값을 랜덤하게 설정하는 경우
+# random.seed(1)
+# weights = 2 * random.random((3, 1))-1
+
+# Define initial weights : 가중값을 적당한 값으로 설정하는 경우
+weights=array([[0.1],[0.2],[0.3]])
+print ('Starting weights:', weights)
+
+epoch=10000
+for iteration in range(epoch):
+    pred_in=dot(training_inputs, weights)
+    sigmoid = 1 / (1 + exp(-(pred_in)))
+    error=sigmoid-target_outputs 
+    sigmoid_der=sigmoid*(1-sigmoid)
+    deriv=error * sigmoid_der
+    deriv_final=dot(training_inputs.T, deriv)
+    weights -= alpha* deriv_final
+# program check   
+#    print(' training_inputs.T', training_inputs.T)
+#    print('pred_in', pred_in)
+#    print('sigmoid', sigmoid)
+#    print('sigmoid_der', sigmoid_der)
+#    print('error', error)
+#    print('deriv', deriv)
+#    print('deriv_final', deriv_final)
+
+    pred_out=dot(array([1,0,0]), weights)
+ 
+print ('Ending weights after training:', weights)
+result=1 / (1 + exp(-(pred_out)))
+print ('New output data:', result)
