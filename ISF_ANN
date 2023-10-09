@@ -23,8 +23,8 @@ y = np.array([[0.0167],[0.5662],[0.4266],[0.4015],[0.0355],[0.160],  [0.6251],[0
 #y = pd.read_csv(filename)
 
 #사이킷 런(sklearn)에서는 제공하는 train_test_split 함수를 이용하여 랜덤하게 선정한 데이터 셋트를 train:val:test(7:1.5:1.5) 비율로 분할
-X_train, x_test, Y_train, y_test = train_test_split( X, y,  test_size=0.3, shuffle=True, random_state=None )
-x_val, x_test, y_val, y_test = train_test_split( x_test, y_test, random_state=None, test_size=0.5 )
+X_train, X_test, y_train, y_test = train_test_split( X, y,  test_size=0.3, shuffle=True, random_state=None )
+X_val, X_test, y_val, y_test = train_test_split( X_test, y_test, random_state=None, test_size=0.5 )
 
 # Define the model
 #model.add(Dense(units=10, input_dim=5, activation='ReLU'))
@@ -43,16 +43,16 @@ model.compile(optimizer='adam', loss='mean_squared_error')
 #학습과정에 필요한 손실 함수, 최적화 방법 설정
 
 # Train the model and store the history
-hist=model.fit(X_train, Y_train, epochs=epochs, batch_size=1, validation_data=(x_val, y_val),verbose=1) 
+hist=model.fit(X_train, y_train, epochs=epochs, batch_size=1, validation_data=(X_val, y_val),verbose=1) 
 #모델의 학습과정
 
 # Predict values
-y_pred = model.predict(x_test)
+y_pred = model.predict(X_test)
 
 def RMSE(y_test, y_pred):
     return np.sqrt(mean_squared_error(y_test, y_pred)) 
 
-print("x_test:", x_test)
+print("x_test:", X_test)
 print("y_test:", y_test)
 print("Predictions: ", y_pred)
 print("RMSE:", RMSE(y_test, y_pred))
