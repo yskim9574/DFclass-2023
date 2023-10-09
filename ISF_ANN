@@ -1,85 +1,66 @@
-import numpy as np 
-#np.random.seed(0)
+# 점진성형의 스프링 백 문제
+# Keras 기능 이용 
+# Input datasets by Van-Cuong Do, YoungSuk Kim, Procedia Engineering(2017) pp.35-42.
+# Relu 함수, sigmoid 함수 사용
+# 입력 26가지 상태, 입력층 5개 뉴런, 첫번째 은닉층에 10개의 뉴런, 두번째 은닉층에 30개의 뉴런, 출력층에 1개 뉴런 사용
 
-def sigmoid (x):
-   return 1/(1 + np.exp(-x))
+#[이하에는 keras 프로그램의 중요한 부분만을 나타내었다. ]
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
 
-def sigmoid_der(x):
-    return sigmoid(x)*(1-sigmoid(x))
+epochs=500
+X = np.array([[0.8333, 0.75, 0.6, 0.4,1], [1,1,1,1,1],[1,0.75, 0.6,1,0.6666],[0.9166,0.75,0,1,0.3333],[0.8333,1,1,0.4,0.6666],[0.8333,1,0.6,1,0.3333],[0.9166,1,0,0.4,1],[0.9166,0.5,1,1,0.6666],[0.9166,0.5,0.6,0.4,0.3333],[1,0.75,1,0.4,0.3333],[0.9166,0.75,1,0.7,1],[0.8333,0.5,1,0.7,0.3333],[0.8333,0.5,0,1,1],[0.9166,1,0.6,0.7,0.6666],[1,0.5,0.6,0.7,1],[1,1,0,0.7,0.3333],[0.8333,0.75,0,0.7,0.6666],[1,0.5,0,0.4,0.6666],[0.8333, 0.75, 0.6, 0.4,1],[1,0.75, 0.6,1,0.6666],  [0.8333,1,0.6,1,0.3333],[1,0.75,1,0.4,0.3333], [0.9166,1,0.6,0.7,0.6666],  [0.8333,0.75,0,0.7,0.6666],[1,0.5,0,0.4,0.6666], [1,1,0,0.7,0.3333],[1,1,1,1,1]])
+y = np.array([[0.0167],[0.5662],[0.4266],[0.4015],[0.0355],[0.160],  [0.6251],[0.8211],[0.677],[0.2607],[0.3568],[0.4191],[0.5712],[0.2189],[1],[0.6092],[0.2971],[0.8842],[0.0160],[0.430],[0.157],[0.2612], [0.2177],[0.3012],[0.8800],[0.6130], [0.5607]],'float32')
 
-#Input datasets
-inputs = np.array([[1, 0.666,0.666,0.333],[0.8, 0.666, 0.333,0.333],[0.8,0.333,1,0.666],
-                   [1,0.666,1,0.666],[0.6, 0.666, 0.666, 0.333]])
-target_output = np.array([[0.9819],[0.9975],[0.9857],[0.9799],[1]])
+#여기서는 데이터의 개수가 적기 때문에 직접 입력하였지만 입력 파일이 큰 경우에는 filename.csv 형식으로 한 엑셀파일을 구글 드라이브에 업로드하여 다음과 같이 불러들여 사용하길 추천한다.
+#from google.colab import drive
+#drive.mount('/content/drive')
+#filename = '/content/drive/My Drive/ISFx_springback.csv'
+#x= pd.read_csv(filename)
+#filename = '/content/drive/My Drive/ISFy_springback.csv'
+#y = pd.read_csv(filename)
 
-epochs = 150000
-alpha = 0.1
-inputLayerNeurons, hiddenLayerNeurons, outputLayerNeurons = 4, 3,1
+#사이킷 런(sklearn)에서는 제공하는 train_test_split 함수를 이용하여 랜덤하게 선정한 데이터 셋트를 train:val:test(7:1.5:1.5) 비율로 분할
+X_train, x_test, Y_train, y_test = train_test_split( X, y,  test_size=0.3, shuffle=True, random_state=None )
+x_val, x_test, y_val, y_test = train_test_split( x_test, y_test, random_state=None, test_size=0.5 )
 
-hidden_weights=np.array([[0.1, 0.2, 0.3],[0.3,0.4,0.5],[0.4,0.5,0.6],
-                         [0.5,0.6,0.7]])
+# Define the model
+#model.add(Dense(units=10, input_dim=5, activation='ReLU'))
+#model.add(Dense(units=30))
+#model.add(Dense(units=1, activation='sigmoid'))
 
-                                                                                        
-hidden_bias=np.array([[0.1, 0.2, 0.3]])
-output_weights=np.array([[0.5], [0.6], [0.7]])
-output_bias=np.array([[0.3]])
+#check the difference of the following model
+model = Sequential([
+    Dense(10, input_dim=5, activation='relu'),
+    Dense(30, activation='relu'),
+    Dense(1)
+])
 
-#Random weights and bias initialization
-#hidden_weights = np.random.uniform(size=(inputLayerNeurons,hiddenLayerNeurons))
-#hidden_bias =np.random.uniform(size=(1,hiddenLayerNeurons))
-#output_weights = np.random.uniform(size=(hiddenLayerNeurons,outputLayerNeurons))
-#output_bias = np.random.uniform(size=(1,outputLayerNeurons))
+# Compile the model
+model.compile(optimizer='adam', loss='mean_squared_error')
+#학습과정에 필요한 손실 함수, 최적화 방법 설정
 
-print("Initial hidden weights: ",end='')
-print(*hidden_weights)
-print("Initial hidden biases: ",end='')
-print(*hidden_bias)
-print("Initial output weights: ",end='')
-print(*output_weights)
-print("Initial output biases: ",end='')
-print(*output_bias)
+# Train the model and store the history
+hist=model.fit(X_train, Y_train, epochs=epochs, batch_size=1, validation_data=(x_val, y_val),verbose=1) 
+#모델의 학습과정
 
-#Training algorithm
-for _ in range(epochs):
-#Forward Propagation
-  hidden_layer_activation = np.dot(inputs,hidden_weights)
-  hidden_layer_activation += hidden_bias
-  hidden_layer_output = sigmoid(hidden_layer_activation)
+# Predict values
+y_pred = model.predict(x_test)
 
-  output_layer_activation = np.dot(hidden_layer_output,output_weights)
-  output_layer_activation += output_bias
-  predicted_output = sigmoid(output_layer_activation)
+def RMSE(y_test, y_pred):
+    return np.sqrt(mean_squared_error(y_test, y_pred)) 
 
-  #Backpropagation
-  error = target_output - predicted_output
-  d_predicted_output = error * sigmoid_der(predicted_output)
-  
-  error_hidden_layer = d_predicted_output.dot(output_weights.T)
-  d_hidden_layer = error_hidden_layer * sigmoid_der(hidden_layer_output)
+print("x_test:", x_test)
+print("y_test:", y_test)
+print("Predictions: ", y_pred)
+print("RMSE:", RMSE(y_test, y_pred))
 
-  #Updating Weights and Biases
-  output_weights += hidden_layer_output.T.dot(d_predicted_output) * alpha
-  output_bias += np.sum(d_predicted_output,axis=0,keepdims=True) * alpha
-  hidden_weights += inputs.T.dot(d_hidden_layer) * alpha
-  hidden_bias += np.sum(d_hidden_layer,axis=0,keepdims=True) * alpha
 
-print("Final hidden weights: ",end='')
-print(*hidden_weights)
-print("Final hidden bias: ",end='')
-print(*hidden_bias)
-print("Final output weights: ",end='')
-print(*output_weights)
-print("Final output bias: ",end='')
-print(*output_bias)
-
-print("Predicted output after training: ",end='')
-print(*predicted_output)  # compare with print(predicted_output)
-
-new_point=np.array([0.8,1,0.666,1])
-hidden_layer_activation = np.dot(new_point,hidden_weights)+hidden_bias
-hidden_layer_output = sigmoid(hidden_layer_activation)
-
-output_layer_activation = np.dot(hidden_layer_output,output_weights)+output_bias
-
-new_output = sigmoid(output_layer_activation)
-print("new_output:", new_output)
+# Plot loss-epoch curve
+plt.plot(history.history['loss'])
+plt.title('Model loss')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.show()
