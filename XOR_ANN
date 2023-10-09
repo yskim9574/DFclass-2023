@@ -1,0 +1,65 @@
+# XOR gate 문제
+# sigmoid 함수만 사용
+# 입력 4가지 상태, 입력층 2개 뉴런, 1개의 은닉층에 2개의 뉴런, 출럭층에 1개의 뉴런
+# 표시는 주석임
+# 이하에는 프로그램의 중요한 부분만을 나타내었다.
+import numpy as np 
+#np.random.seed(0)
+def sigmoid (x):
+    return 1/(1 + np.exp(-x))
+def sigmoid_derivative(x):
+    return x * (1 - x)
+# 입력 데이타 셋트
+inputs = np.array([[0,0],[0,1],[1,0],[1,1]])
+expected_output = np.array([[0],[1],[1],[0]])
+epochs = 10000
+lr = 0.1
+inputLayerNeurons, hiddenLayerNeurons, outputLayerNeurons = 2,2,1
+hidden_weights=np.array([[0.1, 0.2], [0.3,0.4]])
+hidden_bias=np.array([[0.1, 0.2]])
+output_weights=np.array([[0.5], [0.6]])
+output_bias=np.array([[0.3]])
+
+# 가중값과 바이어스값 랜덤 설정
+#hidden_weights = np.random.uniform(size=(inputLayerNeurons,hiddenLayerNeurons))
+#hidden_bias =np.random.uniform(size=(1,hiddenLayerNeurons))
+#output_weights = np.random.uniform(size=(hiddenLayerNeurons,outputLayerNeurons))
+#output_bias = np.random.uniform(size=(1,outputLayerNeurons))
+
+# 학습 알고리즘
+for _ in range(epochs):
+ # 순방향 계산
+  hidden_layer_activation = np.dot(inputs,hidden_weights)  #u=x*w1+b1
+  hidden_layer_activation += hidden_bias
+  hidden_layer_output = sigmoid(hidden_layer_activation) #h=sig(u)
+  output_layer_activation = np.dot(hidden_layer_output,output_weights) #v=h*w2+b2
+  output_layer_activation += output_bias
+  predicted_output = sigmoid(output_layer_activation) #O=sig(v)
+
+# 역방향 계산(역전파)
+  error = expected_output - predicted_output #e= {dE/dO} = -(O-t)
+  d_predicted_output = error * sigmoid_derivative(predicted_output) #{dE/dO}*{dO/dv}  
+  error_hidden_layer = d_predicted_output.dot(output_weights.T)
+#(dE/dO)*(dO/dv)*(dv/dh)=(dE/dO)*(dO/dv)*(w2^T), dv/dh=w1
+  d_hidden_layer = error_hidden_layer * sigmoid_derivative(hidden_layer_output) 
+#{(dE/dO)*(dO/dv)*(w2^T)}*{dh/du}
+
+# 가중값과 바이어스값 갱신
+  output_weights += hidden_layer_output.T.dot(d_predicted_output) * lr 
+#w2=w2-alpha*dE/dw2=w2-alpha*{(dE/dO}*(dO/dv))*(dv/dw2)
+  output_bias += np.sum(d_predicted_output,axis=0,keepdims=True) * lr
+  hidden_weights += inputs.T.dot(d_hidden_layer) * lr
+#w1=w1-alpha*dE/dw1=w1-alpha*{(dE/dO)*(dO/dv))*(dv/dh)}*{(dh/du)*(du/dw1)}, du/dw1=x
+  hidden_bias += np.sum(d_hidden_layer,axis=0,keepdims=True) * lr
+
+# 결과 출력
+print("Final hidden weights: ",end='')
+print(*hidden_weights)
+print("Final hidden bias: ",end='')
+print(*hidden_bias)
+print("Final output weights: ",end='')
+print(*output_weights)
+print("Final output bias: ",end='')
+print(*output_bias)
+print("\nOutput from neural network after 10,000 epochs: ",end='')
+print(*predicted_output)
