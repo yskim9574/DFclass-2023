@@ -1,8 +1,13 @@
+#include <SoftwareSerial.h>
+int TxPin = 0;
+int RxPin = 1;
+int ledPin = 10;
+
 char Incoming_value=0;
 void setup() 
 {
   Serial.begin(9600);         
-  pinMode(13, OUTPUT);       
+  pinMode(ledPin, OUTPUT);       
 }
 void loop()
 {
@@ -12,8 +17,8 @@ void loop()
     Serial.print(Incoming_value);        
     Serial.print("\n");        
     if(Incoming_value == '1')             
-      digitalWrite(13, HIGH);  
+      digitalWrite(ledPin, HIGH);  
     else if(Incoming_value == '0')       
-      digitalWrite(13, LOW);   
+      digitalWrite(ledPin, LOW);   
   }                            
 }
