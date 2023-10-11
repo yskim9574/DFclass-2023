@@ -1,0 +1,27 @@
+//[프로그램 17]
+// Include the Servo library 
+#include <Servo.h>
+
+Servo myServo; 
+int angle=90;
+int servoPin=9;
+void setup() 
+{
+  myServo.attach(servoPin);  
+}
+
+void loop() 
+{
+    for (angle =0 ; angle<= 180; angle +=1) 
+{
+        myServo.write(angle);
+        delay(15);
+
+   }
+   for (angle =180 ; angle<=0; angle -=1) 
+{
+       myServo.write(angle);
+       delay(15);
+   
+   }   
+} 
