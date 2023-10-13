@@ -1,0 +1,89 @@
+import gym
+import numpy as np
+import matplotlib.pyplot as plt
+from IPython.display import display, clear_output
+import math  
+
+# Create CartPole environment
+env = gym.make('CartPole-v1')
+n_actions = env.action_space.n
+n_states = [20, 20, 20, 20]  # We'll discretize the continuous state space into 20 bins per state variable
+state_bounds = list(zip(env.observation_space.low, env.observation_space.high))
+state_bounds[1] = [-0.5, 0.5]  # Adjusting bounds for velocity
+state_bounds[3] = [-math.radians(50), math.radians(50)]  # Adjusting bounds for angular velocity
+
+
+# Discretize state space
+def get_discrete_state(state):
+    adjusted_bounds = state - np.array([bound[0] for bound in state_bounds])
+    proportion = adjusted_bounds / np.array([bound[1] - bound[0] for bound in state_bounds])
+    discrete_state = proportion * np.array(n_states)
+    discrete_state = np.clip(discrete_state, 0, np.array(n_states) - 1)  # Clip the state values
+    return tuple(discrete_state.astype(np.int))
+
+
+# Initialize Q table
+q_table = np.random.uniform(low=-1, high=1, size=(n_states + [n_actions]))
+
+# Training parameters
+alpha = 0.1  # Learning rate
+gamma = 0.99  # Discount factor
+epsilon = 0.1  # Exploration rate
+
+# Training loop
+n_episodes = 10000
+for episode in range(n_episodes):
+    state = get_discrete_state(env.reset())
+    done = False
+    while not done:
+        if np.random.uniform() < epsilon:
+            action = env.action_space.sample()  # Explore
+        else:
+            action = np.argmax(q_table[state])  # Exploit
+        next_state, reward, done, _ = env.step(action)
+        next_state = get_discrete_state(next_state)
+        
+        # Update Q value
+        max_future_q = np.max(q_table[next_state])
+        current_q = q_table[state + (action,)]
+        new_q = (1 - alpha) * current_q + alpha * (reward + gamma * max_future_q)
+        q_table[state + (action,)] = new_q
+        
+        state = next_state
+
+# Visualization loop
+for _ in range(5):  # Show 5 episodes
+    state = get_discrete_state(env.reset())
+    done = False
+    while not done:
+        clear_output(wait=True)
+        env.render()
+        action = np.argmax(q_table[state])  # Exploit trained policy
+        next_state, _, done, _ = env.step(action)
+        state = get_discrete_state(next_state)
+
+env.close()
+
+!pip install gym[box2d] pyvirtualdisplay matplotlib
+
+from pyvirtualdisplay import Display
+virtual_display = Display(visible=0, size=(400, 300))  # Changed variable name to virtual_display
+virtual_display.start()
+
+import gym
+import matplotlib.pyplot as plt
+from IPython import display as ipythondisplay  # Here, display is a module name
+
+env = gym.make('CartPole-v1')
+env.reset()
+img = plt.imshow(env.render('rgb_array')) 
+
+for _ in range(100):
+    img.set_data(env.render('rgb_array')) 
+    plt.axis('off')
+    ipythondisplay.display(plt.gcf())  # Using the display function from the ipythondisplay module
+    ipythondisplay.clear_output(wait=True)
+    action = env.action_space.sample()
+    env.step(action)
+
+env.close()
