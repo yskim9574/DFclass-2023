@@ -1,0 +1,77 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def relu(x):
+    return np.maximum(0, x)
+
+def relu_derivative(x):
+    return np.where(x > 0, 1, 0)
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+def sigmoid_derivative(x):
+    return x * (1 - x)
+
+# Define the dataset for XOR gate
+inputs = np.array([[0, 0],
+                   [0, 1],
+                   [1, 0],
+                   [1, 1]])
+outputs = np.array([[0], [1], [1], [0]])
+
+# Initialize weights and biases
+input_size = 2
+hidden_size = 2
+output_size = 1
+
+np.random.seed(0)  # for reproducibility
+W1 = np.random.randn(input_size, hidden_size)
+b1 = np.zeros((1, hidden_size))
+W2 = np.random.randn(hidden_size, output_size)
+b2 = np.zeros((1, output_size))
+
+learning_rate = 0.1
+epochs = 10000
+
+# List to store loss values
+losses = []
+
+for epoch in range(epochs):
+    # Forward propagation
+    hidden_layer_input = np.dot(inputs, W1) + b1
+    hidden_layer_output = relu(hidden_layer_input)
+    output_layer_input = np.dot(hidden_layer_output, W2) + b2
+    predicted_output = sigmoid(output_layer_input)
+    
+    # Backpropagation
+    error = outputs - predicted_output
+    d_predicted_output = error * sigmoid_derivative(predicted_output)
+    
+    error_hidden_layer = d_predicted_output.dot(W2.T)
+    d_hidden_layer = error_hidden_layer * relu_derivative(hidden_layer_output)
+    
+    # Update weights and biases
+    W2 += hidden_layer_output.T.dot(d_predicted_output) * learning_rate
+    b2 += np.sum(d_predicted_output, axis=0, keepdims=True) * learning_rate
+    W1 += inputs.T.dot(d_hidden_layer) * learning_rate
+    b1 += np.sum(d_hidden_layer, axis=0, keepdims=True) * learning_rate
+    
+    # Calculate and store the loss (MSE - Mean Squared Error)
+    loss = np.mean(np.square(error))
+    losses.append(loss)
+
+# Plot the loss values
+plt.plot(losses)
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Loss vs. Epoch')
+plt.show()
+print()
+
+# Test the model for the input [1, 0]
+test_input = np.array([[1, 0]])
+hidden_layer_output = relu(np.dot(test_input, W1) + b1)
+predicted_output = sigmoid(np.dot(hidden_layer_output, W2) + b2)
+print("output after 10000 epoche:" , predicted_output)
