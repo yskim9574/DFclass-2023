@@ -1,0 +1,33 @@
+import pandas as pd
+from tabulate import tabulate
+
+# 재무상태표
+balance_sheet_data = {
+    '항목': ['현금 및 현금성자산', '매출채권', '토지', '건물', '매입채무', '장기차입금', '자본금', '이익잉여금'],
+    '금액': [10000, 5000, 50000, 40000, 3000, 20000, 50000, 32000]
+}
+balance_sheet = pd.DataFrame(balance_sheet_data)
+print()
+
+# 손익계산서
+income_statement_data = {
+    '항목': ['매출', '매출원가', '매출총이익', '판매관리비', '영업이익', '기타 수익', '기타 비용', '세전이익', '법인세', '당기순이익'],
+    '금액': [100000, -60000, 40000, -15000, 25000, 2000, -1000, 26000, -5200, 20800]
+}
+income_statement = pd.DataFrame(income_statement_data)
+print()
+
+# 현금흐름표
+cash_flow_data = {
+    '항목': ['당기순이익', '매출채권 증가', '매입채무 증가', '영업활동 현금흐름', '건물 구입', '장기차입금 증가', '기초 현금 및 현금성자산', '기말 현금 및 현금성자산'],
+    '금액': [20800, -5000, 3000, 18800, -40000, 20000, 11200, 10000]
+}
+cash_flow = pd.DataFrame(cash_flow_data)
+
+# 각 재무재표를 tabulate를 사용하여 출력
+print("재무상태표")
+print(tabulate(balance_sheet, headers='keys', tablefmt='grid', showindex=False))
+print("\n손익계산서")
+print(tabulate(income_statement, headers='keys', tablefmt='grid', showindex=False))
+print("\n현금흐름표")
+print(tabulate(cash_flow, headers='keys', tablefmt='grid', showindex=False))
