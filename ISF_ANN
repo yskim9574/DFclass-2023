@@ -59,7 +59,7 @@ print("RMSE:", RMSE(y_test, y_pred))
 
 
 # Plot loss-epoch curve
-plt.plot(history.history['loss'])
+plt.plot(hist.history['loss'])
 plt.title('Model loss')
 plt.ylabel('Loss')
 plt.xlabel('Epoch')
