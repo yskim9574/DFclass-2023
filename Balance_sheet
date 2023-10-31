@@ -1,14 +1,26 @@
 import pandas as pd
 from tabulate import tabulate
 
-# 재무상태표
-balance_sheet_data = {
+# MultiIndex 생성
+arrays = [
+    ['자산', '자산', '자산', '자산', '부채', '부채', '자본', '자본'],
+    ['유동자산', '유동자산', '비유동자산', '비유동자산', '유동부채', '비유동부채', '자본', '자본']
+]
+
+tuples = list(zip(*arrays))
+index = pd.MultiIndex.from_tuples(tuples, names=['분류1', '분류2'])
+
+# 재무상태표 데이터
+data = {
     '항목': ['현금 및 현금성자산', '매출채권', '토지', '건물', '매입채무', '장기차입금', '자본금', '이익잉여금'],
     '금액': [10000, 5000, 50000, 40000, 3000, 20000, 50000, 32000]
 }
-balance_sheet = pd.DataFrame(balance_sheet_data)
-print()
 
+# MultiIndex를 사용하여 DataFrame 생성
+balance_sheet = pd.DataFrame(data, index=index)
+print("재무상태표")
+# 표 출력
+print(tabulate(balance_sheet, headers='keys', tablefmt='grid', showindex=True))
 # 손익계산서
 income_statement_data = {
     '항목': ['매출', '매출원가', '매출총이익', '판매관리비', '영업이익', '기타 수익', '기타 비용', '세전이익', '법인세', '당기순이익'],
