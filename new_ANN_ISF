@@ -1,0 +1,63 @@
+# 점진성형의 스프링 백 문제
+# Keras 기능 이용 
+# Input datasets by Van-Cuong Do, YoungSuk Kim, Procedia Engineering(2017) pp.35-42.
+# Relu 함수, sigmoid 함수 사용
+# 입력 26가지 상태, 입력층 5개 뉴런, 첫번째 은닉층에 10개의 뉴런, 두번째 은닉층에 30개의 뉴런, 출력층에 1개 뉴런 사용
+
+#[이하에는 keras 프로그램의 중요한 부분만을 나타내었다. ]
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+
+epochs=500
+X = np.array([[0.8333, 0.75, 0.6, 0.4,1], [1,1,1,1,1],[1,0.75, 0.6,1,0.6666],[0.9166,0.75,0,1,0.3333],[0.8333,1,1,0.4,0.6666],[0.8333,1,0.6,1,0.3333],[0.9166,1,0,0.4,1],[0.9166,0.5,1,1,0.6666],[0.9166,0.5,0.6,0.4,0.3333],[1,0.75,1,0.4,0.3333],[0.9166,0.75,1,0.7,1],[0.8333,0.5,1,0.7,0.3333],[0.8333,0.5,0,1,1],[0.9166,1,0.6,0.7,0.6666],[1,0.5,0.6,0.7,1],[1,1,0,0.7,0.3333],[0.8333,0.75,0,0.7,0.6666],[1,0.5,0,0.4,0.6666],[0.8333, 0.75, 0.6, 0.4,1],[1,0.75, 0.6,1,0.6666],  [0.8333,1,0.6,1,0.3333],[1,0.75,1,0.4,0.3333], [0.9166,1,0.6,0.7,0.6666],  [0.8333,0.75,0,0.7,0.6666],[1,0.5,0,0.4,0.6666], [1,1,0,0.7,0.3333],[1,1,1,1,1]])
+y = np.array([[0.0167],[0.5662],[0.4266],[0.4015],[0.0355],[0.160],  [0.6251],[0.8211],[0.677],[0.2607],[0.3568],[0.4191],[0.5712],[0.2189],[1],[0.6092],[0.2971],[0.8842],[0.0160],[0.430],[0.157],[0.2612], [0.2177],[0.3012],[0.8800],[0.6130], [0.5607]],'float32')
+
+#여기서는 데이터의 개수가 적기 때문에 직접 입력하였지만 입력 파일이 큰 경우에는 filename.csv 형식으로 한 엑셀파일을 구글 드라이브에 업로드하여 다음과 같이 불러들여 사용하길 추천한다.
+#from google.colab import drive
+#drive.mount('/content/drive')
+#filename = '/content/drive/My Drive/ISFx_springback.csv'
+#x= pd.read_csv(filename)
+#filename = '/content/drive/My Drive/ISFy_springback.csv'
+#y = pd.read_csv(filename)
+
+#사이킷 런(sklearn)에서는 제공하는 train_test_split 함수를 이용하여 랜덤하게 선정한 데이터 셋트를 train:val:test(7:1.5:1.5) 비율로 분할
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, shuffle=True, random_state=None)
+X_val, X_test, y_val, y_test = train_test_split(X_test, y_test, shuffle=True, test_size=0.5)
+
+#check the difference of the following model
+model = Sequential([
+    Dense(10, input_dim=5, activation='relu'),
+    Dense(30, activation='relu'),
+#    Dense(1, activation='sigmoid')
+    Dense(1)    
+])
+
+# Compile the model
+model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
+#학습과정에 필요한 손실 함수, 최적화 방법 설정
+# Train the model and store the history
+hist = model.fit(X_train, y_train, epochs=epochs, batch_size=1, validation_data=(X_val, y_val), verbose=1)
+
+#모델의 학습과정
+
+# Predict values
+y_pred = model.predict(X_test)
+
+# Plot loss-epoch curve
+
+print("x_test:", X_test)
+print("y_test:", y_test)
+print("Predictions: ", y_pred)
+print("RMSE:", RMSE(y_test, y_pred))
+
+plt.plot(hist.history['loss'], label='Training Loss')
+plt.plot(hist.history['val_loss'], label='Validation Loss')
+plt.title('Model loss')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.legend()
+plt.show()
