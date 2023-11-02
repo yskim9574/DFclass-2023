@@ -1,0 +1,60 @@
+#현금성자산=8000, 단기금융상품=5000, 매출채권=6700, 재고자산=6200, 장기금융상품=125, 
+#투자부동산=2800, 유형자산=13900, 영업권=2500, 비유동금융자산=220, 유동성장기차입금=6500, 
+#매입채무=2500, 기타유동부채=120, 장기차입금=2100, 이연법인세=970,비유동성금융부채=6455,
+#자본금=10800, 자본잉여금=31400, 이익잉여금(결손금)=19744
+
+
+# 각 항목별 금액
+assets = {
+    '현금성자산': 8000,
+    '단기금융상품': 5000,
+    '매출채권': 6700,
+    '재고자산': 6200,
+    '장기금융상품': 125,
+    '투자부동산': 2800,
+    '유형자산': 13900,
+    '영업권': 2500,
+    '비유동금융자산': 220
+}
+
+liabilities = {
+    '유동성장기차입금': 6500,
+    '매입채무': 2500,
+    '기타유동부채': 120,
+    '장기차입금': 2100,
+    '이연법인세': 970,
+    '기타유동금융부채': 8455  # 추가된 항목
+}
+
+equity = {
+    '자본금': 10800,
+    '자본잉여금': 31400,   # 수정된 금액
+    '이익잉여금': -17400   # 손실 반영 (결손금)
+}
+
+# 총계 계산
+total_assets = sum(assets.values())
+total_liabilities = sum(liabilities.values())
+total_equity = sum(equity.values())
+
+# 재무재표 
+print("재무재표")
+print("-" * 50)
+print("자산")
+for name, value in assets.items():
+    print(f"{name}: {value}")
+print(f"자산총계: {total_assets}")
+print("-" * 50)
+print("부채")
+for name, value in liabilities.items():
+    print(f"{name}: {value}")
+print(f"부채총계: {total_liabilities}")
+print("-" * 50)
+print("자본")
+for name, value in equity.items():
+    print(f"{name}: {value}")
+print(f"자본총계: {total_equity}")
+print("-" * 50)
+
+# 자산총계=부채총계+자본총계.
+assert total_assets == total_liabilities + total_equity
