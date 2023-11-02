@@ -1,0 +1,31 @@
+# 손익계산서 항목별 금액
+income_statement = {
+    '매출액': 1150,
+    '매출원가': -650,
+    '판관비': -220,
+    '금융수익': 50,
+    '금융비용': -30,
+    '법인세 비용': -90
+}
+
+# 손익계산서 계산
+gross_profit = income_statement['매출액'] + income_statement['매출원가']  # 총매출이익 = 매출액 - 매출원가
+operating_income = gross_profit - income_statement['판관비']  # 영업이익 = 총매출이익 - 판관비
+non_operating_result = income_statement['금융수익'] + income_statement['금융비용']  # 영업외 결과 = 금융수익 - 금융비용
+profit_before_tax = operating_income + non_operating_result  # 법인세 차감 전 이익 = 영업이익 + 영업외 결과
+net_income = profit_before_tax + income_statement['법인세 비용']  # 당기순이익 = 법인세 차감 전 이익 - 법인세 비용
+
+# 손익계산서 형태로 나타내기
+print("손익계산서")
+print("-" * 50)
+print(f"매출액: {income_statement['매출액']}")
+print(f"매출원가: {income_statement['매출원가']}")
+print(f"총매출이익: {gross_profit}")
+print(f"판관비: {income_statement['판관비']}")
+print(f"영업이익: {operating_income}")
+print(f"금융수익: {income_statement['금융수익']}")
+print(f"금융비용: {income_statement['금융비용']}")
+print(f"법인세 차감 전 이익: {profit_before_tax}")
+print(f"법인세 비용: {income_statement['법인세 비용']}")
+print(f"당기순이익: {net_income}")
+print("-" * 50)
