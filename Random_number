@@ -1,0 +1,24 @@
+import matplotlib.pyplot as plt
+import random
+import time
+import numpy as np
+
+# Initialize empty lists to store time, random numbers, and mean values
+time_seconds = []
+random_numbers = []
+mean_values = []
+
+plt.ion()  # Turn on interactive mode for real-time plotting
+
+for i in range(200):  # Loop for 200 iterations (10 seconds)
+    current_time = i * 0.1  # Time in seconds
+    time_seconds.append(current_time)
+    if i < 100:
+      random_number = random.randint(1, 5)
+    else:
+      random_number  = random.randint(-2, 8)
+    random_numbers.append(random_number)
+    
+
+print(random_numbers)
+plt.plot(random_numbers)
