@@ -56,7 +56,7 @@ sequence_length = 10  # Replace this with the actual length you used for reshapi
 # and 'labels' is shaped (N, )
 
 # Reshape your data into sequences
-data_reshaped = np.array([original_data[i:i + sequence_length] for i in range(len(original_data) - sequence_length + 1)])
+data_reshaped = np.array([data[i:i + sequence_length] for i in range(len(data) - sequence_length + 1)])
 
 # Adjust your labels to match the reshaped data
 adjusted_labels = labels[sequence_length - 1:]
