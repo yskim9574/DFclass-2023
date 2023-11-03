@@ -1,0 +1,72 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy import signal
+
+# Assuming 'vibration_data' is a list with your vibration data
+vibration_data = [
+    1, 2, 3, 3, 1, 3, 2, 5, 2, 4, 5, 5, 4, 2, 5, 5, 5, 1, np.nan, 3, 1, 5, 1, 4, 2, 3, 2, 5, 1, np.nan, 3, 1, 1, 3, 9, 3, 2, 5, 2, 2, 5, 2, 2, 5, 1, 5, 4, 2, 1, 4, 1, 1, 2, 4, 3, 5, 2, 4, 4, 3, np.nan, 3, 4, 2, -3, 3, 5, 5, 3, 2, 2, 5, 4, 1, 3, 3, 2, 2, 3, 5, 3, 1, 1, 1, 2, 4, 1, 3, 1, 5, 1, 2, 3, 5, 2, 5, 2, 3, 4, 5, 0, -1, 8, np.nan, np.nan, 2, -1, -2, 3, 1, 8, 6, 5, 4, 3, 7, -2, -1, 5, 2, -1, -2, -2, 7, 4, 2, 6, 6, -2, -1, 6, -2, -2, -1, -2, 2, 8, -1, 6, 5, -1, 0, 6, 6, 4, -2, 5, -2, 0, 2, 0, 5, 6, 3, 7, 4, 7, 2, 8, -1, 5, 2, 1, 5, 2, -1, 3, 1, 8, -2, 0, 6, 5, 6, 7, 8, 0, 1, 4, 1, -1, 1, 0, 5, 8, -2, 3, 6, -2, 7, 3, 4, 6, 7, 7, 3, 7, 0, 8, 8 # ... (include all your data points here)
+]
+
+# Convert the list to a NumPy array, treating `None` as `np.nan`
+vibration_array = np.array(vibration_data, dtype=float)
+
+# Find the indices of the missing data
+missing_data_indices = np.where(np.isnan(vibration_array))[0]
+
+# Print positions of missing data
+print(f"Positions of missing data: {missing_data_indices}")
+
+# Define noise as being 3 standard deviations from the mean
+mean = np.nanmean(vibration_array)
+std = np.nanstd(vibration_array)
+
+print(f"mean:{mean}")
+print(f"std:{std}")
+
+# A threshold for noise could be mean +/- 3*std, this is a simple statistical method based on the assumption that the data is normally distributed
+noise_threshold_upper = mean + 2 * std
+noise_threshold_lower = mean - 2 * std
+
+# Find indices where data points are considered noisy
+noisy_data_indices = np.where((vibration_array > noise_threshold_upper) | (vibration_array < noise_threshold_lower))[0]
+
+# Print positions of noise data
+print(f"Positions of noise data: {noisy_data_indices}")
+
+
+
+# Convert to a pandas DataFrame
+data = pd.DataFrame(vibration_data, columns=['vibration'])
+
+# Handle missing values if any - strategy can be chosen based on domain knowledge
+data['vibration'].fillna(method='ffill', inplace=True)  # forward-fill to handle missing values
+
+# Optional: Smooth the data to reduce noise
+window_size = 5
+data['smoothed'] = signal.savgol_filter(data['vibration'], window_size, 2)  # window size and polynomial order
+
+# Compute the absolute difference from the smoothed data
+data['diff'] = np.abs(data['vibration'] - data['smoothed'])
+
+# Compute the mean and standard deviation of the difference
+mean_diff = data['diff'].mean()
+std_diff = data['diff'].std()
+
+# Detect points where the difference exceeds a threshold, e.g., mean + 3*std
+threshold = mean_diff + 3 * std_diff
+data['anomaly'] = data['diff'] > threshold
+
+plt.figure(figsize=(15, 6))
+plt.plot(data['vibration'], label='Vibration data')
+plt.plot(data['smoothed'], label='Smoothed data', color='orange')
+plt.scatter(data.index[data['anomaly']], data['vibration'][data['anomaly']], color='red', label='Anomalies')
+plt.title('Lathe Tool Vibration Data with Potential Failure Points')
+plt.xlabel('Index')
+plt.ylabel('Vibration level')
+plt.legend()
+plt.show()
+
+# Print potential failure points
+failure_points = data.index[data['anomaly']].tolist()
+print(f'Potential failure points (indices): {failure_points}')
