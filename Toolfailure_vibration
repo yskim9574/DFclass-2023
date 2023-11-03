@@ -1,0 +1,88 @@
+import numpy as np
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+
+# Simulated vibration data from a lathe (normal operation and with tool breakage)
+# In a real scenario, you would load your dataset from a file
+# For instance: data = pd.read_csv('vibration_data.csv')
+
+# Normal operation data
+normal_data = np.random.normal(0, 1, (1000, 10))
+
+# Data with anomalies (tool breakage)
+anomaly_data = np.random.normal(0, 5, (50, 10))  # Larger vibrations due to breakage
+
+# Combine the data
+data = np.concatenate((normal_data, anomaly_data))
+
+# Normalizing the data
+scaler = StandardScaler()
+data_normalized = scaler.fit_transform(data)
+
+# Create sequences for LSTM
+def create_sequences(data, time_steps=1):
+    data_s = []
+    for i in range(len(data) - time_steps):
+        data_s.append(data[i:(i + time_steps), :])
+    return np.array(data_s)
+
+# Reshape to [samples, time_steps, features]
+time_steps = 5
+data_reshaped = create_sequences(data_normalized, time_steps)
+
+# Labels (0 for normal, 1 for anomaly)
+labels = np.append(np.zeros(len(normal_data)), np.ones(len(anomaly_data)))
+
+# After creating sequences, adjust the labels to match the data's shape
+def adjust_labels(labels, time_steps=1):
+    return labels[:-time_steps+1]
+
+# We remove the first `sequence_length - 1` labels because no sequence can be formed for them
+# Hypothetical sequence length used to reshape the data
+# Assume sequence_length is correctly defined
+sequence_length = 10  # Replace this with the actual length you used for reshaping your data
+
+# Assuming your original data is in a variable called 'original_data' and 'labels'
+# Let's say 'original_data' is shaped (N, M) where N is number of samples and M is number of features
+# and 'labels' is shaped (N, )
+
+# Assume sequence_length is correctly defined
+sequence_length = 10  # Replace this with the actual length you used for reshaping your data
+
+# Assuming your original data is in a variable called 'original_data' and 'labels'
+# Let's say 'original_data' is shaped (N, M) where N is number of samples and M is number of features
+# and 'labels' is shaped (N, )
+
+# Reshape your data into sequences
+data_reshaped = np.array([original_data[i:i + sequence_length] for i in range(len(original_data) - sequence_length + 1)])
+
+# Adjust your labels to match the reshaped data
+adjusted_labels = labels[sequence_length - 1:]
+
+# Verify that the number of sequences and labels match
+assert len(data_reshaped) == len(adjusted_labels), "The lengths do not match."
+
+# Now proceed to train/test split
+x_train, x_test, y_train, y_test = train_test_split(data_reshaped, adjusted_labels, test_size=0.2, random_state=0)
+
+# Define the LSTM model
+model = Sequential()
+model.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], x_train.shape[2])))
+model.add(Dropout(0.2))
+model.add(LSTM(units=50, return_sequences=False))
+model.add(Dropout(0.2))
+model.add(Dense(units=1, activation='sigmoid'))
+
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+# Train the model
+model.fit(x_train, y_train, epochs=10, batch_size=32)
+
+# Predict on test data
+predictions = model.predict(x_test)
+
+# Anomaly is detected if prediction > threshold
+threshold = 0.5
+anomalies = predictions > threshold
