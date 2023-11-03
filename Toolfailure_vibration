@@ -6,7 +6,7 @@ from sklearn.model_selection import train_test_split
 
 # Simulated vibration data from a lathe (normal operation and with tool breakage)
 # In a real scenario, you would load your dataset from a file
-# For instance: data = pd.read_csv('vibration_data.csv')
+# For instance: data = pd.read_csv('time_series_data.csv')
 
 # Normal operation data
 normal_data = np.random.normal(0, 1, (1000, 10))
