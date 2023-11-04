@@ -1,0 +1,38 @@
+!pip install mplfinance
+import mplfinance as mpf
+import pandas as pd
+import plotly.graph_objects as go
+
+
+# Fetching sample data from the provided CSV URL for Apple stock during 2015-2-17 ~ -2-16
+data = pd.read_csv('https://raw.githubusercontent.com/plotly/datasets/master/finance-charts-apple.csv')
+
+# Check the column names
+print(data.columns)
+
+# Assuming the CSV has the necessary data but with different column names,
+# you may need to rename the columns. Let's say the CSV has these columns for the OHLC data:
+# ['AAPL.Open', 'AAPL.High', 'AAPL.Low', 'AAPL.Close', 'AAPL.Volume']
+# Here's how you can rename them to what mplfinance expects:
+
+# Rename the columns to match mplfinance expectations
+data.rename(columns={
+    'AAPL.Open': 'Open',
+    'AAPL.High': 'High',
+    'AAPL.Low': 'Low',
+    'AAPL.Close': 'Close',
+    'AAPL.Volume': 'Volume'
+}, inplace=True)
+
+# Convert the 'Date' column to datetime format and set it as the index.
+data['Date'] = pd.to_datetime(data['Date'])
+df = data.set_index('Date')
+
+# Now plot the candlestick chart with mplfinance
+mpf.plot(df, type='candle', style='charles',
+         title='AAPL Stock Candlestick Chart',
+         ylabel='Price ($)',
+         ylabel_lower='Volume',
+         volume=True,
+         figratio=(15, 10),
+         mav=(3, 6))  # Moving averages for 3 and 6 periods
