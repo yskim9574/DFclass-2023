@@ -1,0 +1,11 @@
+,id,age,city,f1,f2,f3,f4,f5
+0,id01,2,seoul,47,0,NaN,ENFJ,91.297791
+1,id02,9,seoul,70,1,NaN,ENFJ,60.339826
+2,id03,27,seoul,61,1,NaN,ISTJ,17.252986
+3,id04,75,seoul,77,2,NaN,INFP,52.667078
+4,id05,24,seoul,85,2,NaN,ISFJ,29.269869
+5,id06,47,pusan,94,0,NaN,ENFJ,17.25301
+6,id07,65,pusan,71,1,NaN,INFP,48.43992
+7,id08,81,daegu,55,0,NaN,ENFJ,37.11347
+8,id09,53,daegu,67,1,NaN,ENFJ,69.73452
+9,id10,97,kyungki,78,1,NaN,INFP,97.38265
