@@ -1,106 +1,35 @@
-import pandas as pd
 import xml.etree.ElementTree as ET
+import pandas as pd
 
-# XML data as a string, with special characters escaped
 xml_data = '''
 <books>
     <book>
         <title>The Hobbit</title>
         <author>J.R.R. Tolkien</author>
-        <ISBN>978-0261103283</ISBN>
-        <publishedYear>1937</publishedYear>
-        <publisher>George Allen &amp; Unwin</publisher>
-        <genres>
-            <genre>Fantasy</genre>
-        </genres>
-        <languages>
-            <language>English</language>
-        </languages>
+        <year>1937</year>
     </book>
     <book>
-        <title>Harry Potter and the Philosopher&apos;s Stone</title>
-        <author>J.K. Rowling</author>
-        <ISBN>978-0747532699</ISBN>
-        <publishedYear>1997</publishedYear>
-        <publisher>Bloomsbury</publisher>
-        <genres>
-            <genre>Fantasy</genre>
-            <genre>Young Adult</genre>
-        </genres>
-        <languages>
-            <language>English</language>
-        </languages>
-    </book>
-    <book>
-        <title>1984</title>
-        <author>George Orwell</author>
-        <ISBN>978-0451524935</ISBN>
-        <publishedYear>1949</publishedYear>
-        <publisher>Secker &amp; Warburg</publisher>
-        <genres>
-            <genre>Dystopian</genre>
-            <genre>Science Fiction</genre>
-        </genres>
-        <languages>
-            <language>English</language>
-        </languages>
+        <title>The Lord of the Rings</title>
+        <author>J.R.R. Tolkien</author>
+        <year>1954</year>
     </book>
 </books>'''
 
-# Parse the XML string
+# XML 파일 로드
 root = ET.fromstring(xml_data)
 
-# Parse XML data and store it into a list of dictionaries
-books_data = []
+# DataFrame에 채울 빈 리스트 생성
+books_data = [ ]
+
+# XML 데이터를 파싱
 for book in root.findall('book'):
     title = book.find('title').text
     author = book.find('author').text
-    ISBN = book.find('ISBN').text
-    published_year = book.find('publishedYear').text
-    publisher = book.find('publisher').text
-    genres = [genre.text for genre in book.find('genres').findall('genre')]
-    languages = [language.text for language in book.find('languages').findall('language')]
-    
-    books_data.append({
-        "Title": title,
-        "Author": author,
-        "ISBN": ISBN,
-        "Published Year": published_year,
-        "Publisher": publisher,
-        "Genres": ', '.join(genres),
-        "Languages": ', '.join(languages)
-    })
+    year = book.find('year').text
+    books_data.append({'title': title, 'author': author, 'year': year})
 
-# Convert the list of dictionaries into a DataFrame
+# 리스트를 DataFrame으로 변환
 df = pd.DataFrame(books_data)
 
-# Print the DataFrame
+# DataFrame 출력
 print(df)
-print()
-#sort the book according to special concern
-
-# Filter DataFrame to include only books with the "Fantasy" genre
-fantasy_books = df[df['Genres'].str.contains('Fantasy')]
-
-# Sort the filtered DataFrame by the published year
-sorted_fantasy_books = fantasy_books.sort_values(by='Published Year')
-
-# Print the sorted DataFrame
-print("Fantacy books:")
-print(sorted_fantasy_books[['Title', 'Published Year']])
-print()
-
-# Filter DataFrame to include only books written by J.R.R. Tolkien
-tolkien_books = df[df['Author'] == 'J.R.R. Tolkien']
-
-# Sort Tolkien's books by title
-sorted_tolkien_books = tolkien_books.sort_values(by='Title')
-
-# Print sorted books
-print("Books by J.R.R. Tolkien, sorted by title:")
-print(sorted_tolkien_books[['Title']])
-
-# Count the number of books
-num_tolkien_books = sorted_tolkien_books.shape[0]
-
-print(f"\nTotal number of books written by J.R.R. Tolkien: {num_tolkien_books}")
