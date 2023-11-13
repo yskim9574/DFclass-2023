@@ -1,0 +1,37 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+#Step 1: Import Libraries and Load Data
+# down load from https://www.kaggle.com/competitions/titanic/data
+
+df = pd.read_csv('titanic.csv')
+
+#Step 2: Data Exploration, Show the first 7 rows of the DataFrame
+print(df.head(7))
+print()
+print(round(df.describe(),3))
+
+#Step 3: Data Cleaning, Rows with missing values of 'Age' in this column will be removed.
+df = df.dropna(subset=['Age'])
+
+#Step 4: Calculate the survival rate by gender
+# groupby - group data based on some criteria and then apply a function to each of the groups
+survival_rate_gender = df.groupby('Sex')['Survived'].mean()
+print()
+print(f"Survival rate by gender: {survival_rate_gender}")
+# Calculate the average fare by class
+avg_fare_class = df.groupby('Pclass')['Fare'].mean()
+print("Average fare by class:")
+print(avg_fare_class)
+
+#Step 5: Data Visualization, Plot the survival rate by gender
+survival_rate_gender.plot(kind='bar')
+plt.xlabel('Gender')
+plt.ylabel('Survival Rate')
+plt.title('Survival Rate by Gender')
+plt.show()
+# Plot the average fare by class
+avg_fare_class.plot(kind='bar')
+plt.xlabel('Class')
+plt.ylabel('Average Fare')
+plt.title('Average Fare by Class')
+plt.show()
