@@ -1,0 +1,12 @@
+import scipy.stats as stats
+
+# Sample data: Scores for two classes
+class_a_scores = [85, 78, 90, 88, 77, 84, 82, 75, 89, 91]
+class_b_scores = [80, 70, 65, 68, 72, 75, 78, 74, 72, 69]
+
+# Perform Welch's t-test
+t_statistic, p_value = stats.ttest_ind(class_a_scores, class_b_scores, equal_var=False)
+
+# Output the t-statistic and p-value
+print("t-statistic:", t_statistic)
+print("p-value:", p_value)
