@@ -10,11 +10,9 @@ import matplotlib.pyplot as plt
 df = pd.read_csv('boston.csv')
 
 # Assuming the target variable is in a column named 'MEDV'
+
 X = df.drop('MEDV', axis=1)
 y = df['MEDV']
-
-#print(X[:2])
-#print(y[:2])
 
 # Standardize features
 scaler = StandardScaler()
@@ -25,13 +23,13 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 
 # Create a neural network model, three layers with two hidden layers of 64 and 32 neurons respectively 
 model = Sequential([
-    Dense(64, activation='relu', input_shape=(X_train.shape[1],)),
-    Dense(32, activation='relu'),
-    Dense(1)  # No activation function is used for the output layer in regression problems
+  Dense(64, activation='relu', input_shape=(X_train.shape[1],)),
+  Dense(32, activation='relu'),
+  Dense(1) # No activation function is used for the output layer in regression problems
 ])
 
 # Compile the model
-model.compile(optimizer='adam', loss='mse')  # mean squared error loss function 
+model.compile(optimizer='adam', loss='mse') # squared error loss function 
 
 # Train the model with mini-batch gradient descent method, batch_size=32 means 32 samples(or records/rows) 
 history=model.fit(X_train, y_train, epochs=100, batch_size=32, validation_split=0.1, verbose=1)
@@ -42,9 +40,8 @@ y_pred = model.predict(X_test)
 # Calculate the model's mean squared error
 mse = mean_squared_error(y_test, y_pred)
 print(f'Mean Squared Error: {mse}')
-
+print("Predicted Prices")
 print(y_pred[:5].round(3))
-print(y_test[:5])
 
 # Plot the training loss values
 plt.plot(history.history['loss'])
