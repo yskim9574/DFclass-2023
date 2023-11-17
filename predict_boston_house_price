@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
@@ -22,17 +23,33 @@ model = LinearRegression()
 model.fit(X_train, y_train)
 
 # Use the trained model to predict the prices in the testing set
-pred = model.predict(X_test)
+y_pred = model.predict(X_test)
 print(X_test)
 print()
 
 # Print the predictions and compare with the real value for the first few row
-print(y_test[:5])
-print(pred[:5])
+print("Actual Prices")
+print( y_test[:5])
+print("Predicted Prices")
+print(y_pred[:5].round(3))
+
+
+
 
 # If you want to visualize the predictions against the actual prices, you can use matplotlib
 plt.scatter(y_test, pred)
-plt.xlabel("Actual Prices")
-plt.ylabel("Predicted Prices")
+plt.xlabel("Actual Prices-MEDV")
+plt.ylabel("Predicted Prices-MEDV")
 plt.title("Actual Prices vs Predicted Prices")
-plt.show()  
+plt.show() 
+
+corr_matrix=df.corr()
+
+# plot heatmap
+plt.figure(figsize=(10,10))
+sns.set(font_scale=0.8)
+sns.heatmap(corr_matrix, annot=True, cbar=False)
+plt.show()
+
+corr_order=df.corr().loc[:'LSTAT','MEDV'].abs().sort_values(ascending=False)
+corr_order
