@@ -9,10 +9,11 @@ import matplotlib.pyplot as plt
 df = pd.read_csv('boston.csv')
 print(df.head())
 
-X = df.drop('MEDV', axis=1)
+# remove a specific column (axis=1) or row (axis=0) from a DataFrame.
+X = df.drop('MEDV', axis=1) 
 y = df['MEDV']
 
-# Split the dataset into a training set and a testing set
+# Split the dataset into a training set (80%) and a testing set (20%)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 print(f"Number of training samples: {X_train.shape[0]}")
@@ -29,27 +30,27 @@ print()
 
 # Print the predictions and compare with the real value for the first few row
 print("Actual Prices")
-print( y_test[:5])
+print(y_test[:5])
 print("Predicted Prices")
 print(y_pred[:5].round(3))
 
-
-
-
 # If you want to visualize the predictions against the actual prices, you can use matplotlib
-plt.scatter(y_test, pred)
+plt.scatter(y_test, y_pred)
 plt.xlabel("Actual Prices-MEDV")
 plt.ylabel("Predicted Prices-MEDV")
 plt.title("Actual Prices vs Predicted Prices")
 plt.show() 
 
+# "corr" refers to the correlation coefficient,
 corr_matrix=df.corr()
+
+# show correlation matrix for the DataFrame with Correlation coefficients range from -1 to 1, 
+ 
+corr_order=df.corr().loc[:'LSTAT','MEDV'].abs().sort_values(ascending=False)
+print(corr_order)
 
 # plot heatmap
 plt.figure(figsize=(10,10))
 sns.set(font_scale=0.8)
 sns.heatmap(corr_matrix, annot=True, cbar=False)
 plt.show()
-
-corr_order=df.corr().loc[:'LSTAT','MEDV'].abs().sort_values(ascending=False)
-corr_order
