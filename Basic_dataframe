@@ -32,6 +32,8 @@ df_result = df['Toeic']
 print(df_input)
 print(df_result)
 
+print(round(df_input.mean(),2)) #mean for each column
+
 # Calculate the mean of the 'Phy' column (보통 행 단위보다 열 단위 평균을 이용함)
 phy_mean = df_input['Phy'].mean()
 # Replace NaN values with the  mean of the 'Phy' column
