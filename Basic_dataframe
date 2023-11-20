@@ -1,0 +1,40 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Load the dataset
+df = pd.read_csv('record.csv')
+print(df.head())
+# Find rows or column having missing value , NaN or None
+missing_rows = df[df.isnull().any(axis=1)]
+print(missing_rows)
+
+missing_cols = df.columns[df.isnull().any()].tolist()
+print(missing_cols)
+
+#Data Cleaning, Rows with missing values(or NaN) in this column will be removed.
+df_cleaned_row = df.dropna(axis=0)
+print(df_cleaned_row)
+
+df_cleaned_column = df.dropna(axis=1)
+print(df_cleaned_column)
+
+df['MOT'] = [86, 81, 96, 99, 80, 94]
+df['Factory']=85
+print(df)
+
+# separate and remove a specific column (axis=1) or row (axis=0) from a DataFrame.
+# use X as input data, and y as result
+df_input = df.drop('Toeic', axis=1) 
+df_result = df['Toeic']
+
+print(df_input)
+print(df_result)
+
+# Calculate the mean of all numerical columns
+numerical_mean = df_input.select_dtypes(include=[np.number]).mean().mean()
+# Replace NaN values with the overall mean of numerical columns
+df_input.fillna(round(numerical_mean,2), inplace=True)
+
+print(df_input)
+print(df_result)
