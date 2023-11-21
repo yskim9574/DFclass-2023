@@ -1,40 +1,17 @@
-# 2진수를 10진수로 처리 
-print('10진수(01000001)={0}'.format(0b01000001))
+# Original text
+text = "안녕하세요"
+# Encoding the text in EUC-KR format
+encoded_text = text.encode('euc-kr')
+# Convert to hexadecimal representation
+hex_representation = encoded_text.hex()
+# Convert to decimal representation
+decimal_representation = [byte for byte in encoded_text]
+# Convert to binary representation
+binary_representation = ' '.join(format(byte, '08b') for byte in encoded_text)
 
-# 2진수를 16진수로 처리 
-print('16진수(01000001)={0}'.format(hex(0b01000001)))
+# Print the results
+print("Encoded Text:", encoded_text)
+print("Hexadecimal Representation:", hex_representation)
+print("decimal Representation:", decimal_representation)
+print("Binary Representation:", binary_representation)
 
-# 2진수를 문자로 처리 
-print('16진수(01000001)={0}'.format(chr(0b01000001)))
-print()
-
-
-#hello 문자열을 아스키 코드로 출력
-
-def print_text(text, encoding_type):
-    byte_data = text.encode(encoding_type)
-    hex_data_as_str = ' '.join("{0}".format(hex(c)) for c in byte_data)
-    int_data_as_str = ' '.join("{0}".format(int(c)) for c in byte_data)
-    
-    print('\'' + text + '\' 문자열 길이: {0}'.format(len(text)))
-    print('\'' + text + '\' 전체 문자를 표현하는 데 사용한 바이트 수: {0} 바이트'.format(len(byte_data)))
-    print('\'' + text + '\' 16진수 값 : {0}'.format(hex_data_as_str))
-    print('\'' + text + '\' 10진수 값 : {0}'.format(int_data_as_str))
- 
-print_text("Hello", 'ascii')
-print()
-
-#hello 문자열을 EUC-KR 코드로 출력
-
-def print_text(text, encoding_type):
-    byte_data = text.encode(encoding_type)
-    hex_data_as_str = ' '.join("{0}".format(hex(c)) for c in byte_data)
-    int_data_as_str = ' '.join("{0}".format(int(c)) for c in byte_data)
-    
-    print('\'' + text + '\' 문자열 길이: {0}'.format(len(text)))
-    print('\'' + text + '\' 전체 문자를 표현하는 데 사용한 바이트 수: {0} 바이트'.format(len(byte_data)))
-    print('\'' + text + '\' 16진수 값 : {0}'.format(hex_data_as_str))
-    print('\'' + text + '\' 10진수 값 : {0}'.format(int_data_as_str))
-    
-print_text('Hello', 'euc-kr')
-print_text('안녕하세요', 'euc-kr')
