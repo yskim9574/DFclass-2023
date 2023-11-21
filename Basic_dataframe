@@ -29,15 +29,17 @@ df['Factory']=85
 df_input = df.drop('Toeic', axis=1) 
 df_result = df['Toeic']
 
-print(df_input)
-print(df_result)
-
 print(round(df_input.mean(),2)) #mean for each column
 
 # Calculate the mean of the 'Phy' column (보통 행 단위보다 열 단위 평균을 이용함)
 phy_mean = df_input['Phy'].mean()
 # Replace NaN values with the  mean of the 'Phy' column
 df_input['Phy'].fillna(round(phy_mean,2), inplace=True)
+
+# Calculate the mean of all numerical columns
+#numerical_mean = #df_input.select_dtypes(include=[np.number]).mean().mean()
+# Replace NaN values with the overall mean of numerical columns
+#df_input.fillna(round(numerical_mean,2), inplace=True)
 
 print(df_input)
 print(df_result)
