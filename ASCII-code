@@ -1,3 +1,11 @@
+# Convert binary numbers (2진수) to decimal (10진수)
+print('10진수(01000001)={0}'.format(0b01000001))
+# Convert binary numbers to hexadecimal (16진수)
+print('16진수(01000001)={0}'.format(hex(0b01000001)))
+# Treat binary numbers as characters
+print('16진수(01000001)={0}'.format(chr(0b01000001)))
+print()
+
 # Original text
 text = "안녕하세요"
 # Encoding the text in EUC-KR format
