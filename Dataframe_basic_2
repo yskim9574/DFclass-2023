@@ -1,0 +1,20 @@
+from matplotlib import pyplot as plt
+import numpy as np
+from numpy import array, percentile
+
+heights = [1.70, 1.80, 1.55, 1.43, 1.54, 1.60, 1.63]
+weights = [80.0, 70.4, 65.5, 45.9, 51.2, 72.5, 59.2]
+
+print(len(heights))
+print(np.mean(heights).round(3))
+print(np.var(heights).round(3))
+print(np.std(heights).round(3)) 
+print(np.median(heights).round(3)) 
+print(np.percentile(heights, 25).round(3)) 
+
+# Calculating the Interquartile Range (IQR)
+Q1 = percentile(weights, 25)  # 25th percentile, or the first quartile
+Q3 = percentile(weights, 75)  # 75th percentile, or the third quartile
+IQR = Q3 - Q1  # IQR is the difference between Q3 and Q1
+
+print("Interquartile Range (IQR):", IQR)
