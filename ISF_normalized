@@ -1,0 +1,26 @@
+import pandas as pd
+import numpy as np
+ 
+df = pd.read_csv('ISF.csv')
+print(df)
+
+# 데이터 프레임에서 입력값과 출력값 컬럼 구분 
+X = df.drop('Spring-back', axis=1) 
+y1 = df['Spring-back']
+
+# w_n 값 설정 (가중치, 이 예시에서는 0으로 설정)
+w_n = 0.35
+
+# 모든 열에 대해 정규화 수행
+for column in df.columns:
+    C_min = df[column].min()
+    C_max = df[column].max()
+    D = C_max - C_min
+    df[column] = (df[column] - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
+
+# 정규화된 데이터 프레임에서 입력값과 출력값 구분 
+X = df.drop('Spring-back', axis=1) 
+y = y1
+
+print(X.round(3))
+print(y)
