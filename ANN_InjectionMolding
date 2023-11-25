@@ -1,0 +1,74 @@
+# 인공신경망을 이용한 최적 사출성형성형 조건 예측
+# 양동철 외, 한국소성가공학회지, 제29권 제4호 (2020), 218-
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from sklearn.metrics import mean_squared_error
+import matplotlib.pyplot as plt
+
+df = pd.read_csv('InjectionMolding.csv')
+epochs=500
+# Assuming the target variable is in a column named 'Mass'
+
+X = df.drop('Mass', axis=1)
+y = df['Mass']
+print(X)
+# Standardize features
+#scaler = StandardScaler()
+#X = scaler.fit_transform(X)
+
+# Perform normalization on each column
+# X_max X_min normalization. Set w_n value (set to 0 in this example)
+w_n = 0.2 # If w_n = 0, the columns are normalized to values between 0 and 1.
+
+for column in X.columns:
+    C_min = X[column].min()
+    C_max = X[column].max()
+    D = C_max - C_min
+    X[column] = (X[column] - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
+print("Standardized:X")
+print(X)
+#사이킷 런(sklearn)에서는 제공하는 train_test_split 함수를 이용하여 랜덤하게 선정한 데이터 셋트를 train:val:test(7:1.5:1.5) 비율로 분할
+X_train, X_test, y_train, y_test = train_test_split( X, y,  test_size=0.3, shuffle=True, random_state=None )
+X_val, X_test, y_val, y_test = train_test_split( X_test, y_test, random_state=None, test_size=0.5 )
+
+#check the difference of the following model
+model = Sequential([
+    Dense(10, input_dim=7, activation='ELU'),
+    Dense(30, activation='ELU'),
+    Dense(1)
+ 
+])
+
+# Compile the model
+model.compile(optimizer='adam', loss='mean_squared_error')
+#학습과정에 필요한 손실 함수, 최적화 방법 설정
+
+# Train the model and store the history
+hist=model.fit(X_train, y_train, epochs=epochs, batch_size=1, validation_data=(X_val, y_val),verbose=1) 
+#모델의 학습과정
+
+# Predict values
+y_pred = model.predict(X_test)
+
+def RMSE(y_test, y_pred):
+    return np.sqrt(mean_squared_error(y_test, y_pred)) 
+
+print("x_test:")
+print(X_test)
+print("y_test:")
+print(y_test)
+print("Predictions: ")
+print(y_pred)
+print("RMSE:", RMSE(y_test, y_pred))
+
+# Plot loss-epoch curve
+plt.plot(hist.history['loss'], label='Training Loss')
+plt.plot(hist.history['val_loss'], label='Validation Loss')
+plt.title('Model loss')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.legend()
+plt.show()
