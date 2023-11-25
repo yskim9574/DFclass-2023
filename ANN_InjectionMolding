@@ -42,7 +42,7 @@ model = Sequential([
  
 ])
 
-# Compile the model
+# Compile the model using Adam(adaptive moment estimation)
 model.compile(optimizer='adam', loss='mean_squared_error')
 #학습과정에 필요한 손실 함수, 최적화 방법 설정
 
