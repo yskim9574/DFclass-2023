@@ -15,6 +15,7 @@ epochs=500
 X = df.drop('Mass', axis=1)
 y = df['Mass']
 print(X)
+print(y)
 # Standardize features
 #scaler = StandardScaler()
 #X = scaler.fit_transform(X)
