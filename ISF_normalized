@@ -14,10 +14,16 @@ df = df.drop('Spring-back', axis=1)
 print(df)
 
 # Perform normalization on each column
+w_n = 0.35 
+for column in df.columns:
+    C_min = df[column].min()
+    C_max = df[column].max()
+    D = C_max - C_min
+    df[column] = (df[column] - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
+normalized_df=df
 
-scaler=StandardScaler()
-#scaler=MinMaxScaler()
-normalized_df = scaler.fit_transform(df)
+#scaler=StandardScaler() 또는 #scaler=MinMaxScaler()
+#normalized_df = scaler.fit_transform(df)
 print(normalized_df)
 
 # Separate input and output values in a normalized data frame
