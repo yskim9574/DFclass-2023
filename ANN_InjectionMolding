@@ -1,5 +1,7 @@
 # 인공신경망을 이용한 최적 사출성형성형 조건 예측
 # 양동철 외, 한국소성가공학회지, 제29권 제4호 (2020), 218-
+
+import numpy as np 
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -43,13 +45,11 @@ model = Sequential([
  
 ])
 
-# Compile the model using Adam(adaptive moment estimation)
+# Compile the model
 model.compile(optimizer='adam', loss='mean_squared_error')
-#학습과정에 필요한 손실 함수, 최적화 방법 설정
 
 # Train the model and store the history
 hist=model.fit(X_train, y_train, epochs=epochs, batch_size=1, validation_data=(X_val, y_val),verbose=1) 
-#모델의 학습과정
 
 # Predict values
 y_pred = model.predict(X_test)
@@ -57,13 +57,17 @@ y_pred = model.predict(X_test)
 def RMSE(y_test, y_pred):
     return np.sqrt(mean_squared_error(y_test, y_pred)) 
 
+print("X_train:")
+print(X_train)
+print("X_val:")
+print(X_val)
 print("x_test:")
 print(X_test)
 print("y_test:")
 print(y_test)
 print("Predictions: ")
 print(y_pred)
-print("RMSE:", RMSE(y_test, y_pred))
+print("RMSE:", RMSE(y_test, y_pred).round(4))
 
 # Plot loss-epoch curve
 plt.plot(hist.history['loss'], label='Training Loss')
@@ -73,3 +77,9 @@ plt.ylabel('Loss')
 plt.xlabel('Epoch')
 plt.legend()
 plt.show()
+
+# R2 (R square, R^2=sum(yhat – y_mean )^2 /sum(y_test – y_mean)^2)
+from sklearn.metrics import r2_score
+r2_yhat = r2_score(y_test, y_pred)
+print("R:")
+print(r2_yhat)
