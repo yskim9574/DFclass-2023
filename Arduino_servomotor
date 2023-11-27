@@ -4,7 +4,7 @@
 
 Servo myServo; 
 int angle=90;
-int servoPin=9;
+int servoPin=3;
 void setup() 
 {
   myServo.attach(servoPin);  
