@@ -23,12 +23,11 @@ print(df_cleaned_column)
 #Add data column
 df['MOT'] = [86, 81, 96, 99, 80, 94]
 df['Factory']=85
-
+print(df.head())
 # Separate and remove a specific column (axis=1) or row (axis=0) from a DataFrame.
 # use X as input data, and y as result
 df_input = df.drop('Toeic', axis=1) 
 df_result = df['Toeic']
-
 print(round(df_input.mean(),2)) #mean for each column
 
 # Calculate the mean of the 'Phy' column (보통 행 단위보다 열 단위 평균을 이용함)
