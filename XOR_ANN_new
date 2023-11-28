@@ -27,9 +27,9 @@ hidden_size = 2
 output_size = 1
 
 np.random.seed(0)  # for reproducibility
-W1 = np.random.randn(input_size, hidden_size)
+w1 = np.random.randn(input_size, hidden_size)
 b1 = np.zeros((1, hidden_size))
-W2 = np.random.randn(hidden_size, output_size)
+w2 = np.random.randn(hidden_size, output_size)
 b2 = np.zeros((1, output_size))
 
 learning_rate = 0.1
@@ -40,22 +40,22 @@ losses = []
 
 for epoch in range(epochs):
     # Forward propagation
-    hidden_layer_input = np.dot(inputs, W1) + b1
+    hidden_layer_input = np.dot(inputs, w1) + b1
     hidden_layer_output = relu(hidden_layer_input)
-    output_layer_input = np.dot(hidden_layer_output, W2) + b2
+    output_layer_input = np.dot(hidden_layer_output, w2) + b2
     predicted_output = sigmoid(output_layer_input)
     
     # Backpropagation
     error = outputs - predicted_output
     d_predicted_output = error * sigmoid_derivative(predicted_output)
     
-    error_hidden_layer = d_predicted_output.dot(W2.T)
+    error_hidden_layer = d_predicted_output.dot(w2.T)
     d_hidden_layer = error_hidden_layer * relu_derivative(hidden_layer_output)
     
     # Update weights and biases
-    W2 += hidden_layer_output.T.dot(d_predicted_output) * learning_rate
+    w2 += hidden_layer_output.T.dot(d_predicted_output) * learning_rate
     b2 += np.sum(d_predicted_output, axis=0, keepdims=True) * learning_rate
-    W1 += inputs.T.dot(d_hidden_layer) * learning_rate
+    w1 += inputs.T.dot(d_hidden_layer) * learning_rate
     b1 += np.sum(d_hidden_layer, axis=0, keepdims=True) * learning_rate
     
     # Calculate and store the loss (MSE - Mean Squared Error)
@@ -72,6 +72,6 @@ print()
 
 # Test the model for the input [1, 0]
 test_input = np.array([[1, 0]])
-hidden_layer_output = relu(np.dot(test_input, W1) + b1)
-predicted_output = sigmoid(np.dot(hidden_layer_output, W2) + b2)
+hidden_layer_output = relu(np.dot(test_input, w1) + b1)
+predicted_output = sigmoid(np.dot(hidden_layer_output, w2) + b2)
 print("output after 10000 epoche:" , predicted_output)
