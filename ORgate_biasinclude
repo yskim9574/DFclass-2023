@@ -1,10 +1,9 @@
-# Import required libraries:
-import numpy as np # Define input features
+import numpy as np # Define input features:
 import matplotlib.pyplot as plt
 
-input_features = np.array([[0,0],[0,1],[1,0],[1,1]])
-print (input_features.shape)
-print (input_features)# Define target output:
+training_input = np.array([[0,0],[0,1],[1,0],[1,1]])
+print (training_input.shape)
+print (training_input)# Define target output:
  
 target_output = np.array([[0,1,1,1]])# Reshaping our target output into vector:
 target_output = target_output.reshape(4,1)
@@ -19,31 +18,33 @@ def sigmoid(x):
  return 1/(1+np.exp(-x))# Derivative of sigmoid function:
 def sigmoid_der(x):
  return sigmoid(x)*(1-sigmoid(x))# Main logic for neural network:
-# Running our code 10000 times:
-
-for epoch in range(10000):
-  inputs = input_features #Feedforward input:
-in_o = np.dot(inputs, weights) + bias #Feedforward output:
-out_o = sigmoid(in_o) #Backpropogation
-# Calculating error
-error = out_o - target_output
-# Going with the formula:
+# Running our code epoch iteration:
+epoch=15000
+for iteration in range(epoch):
+  #Feedforward input:
+  pred_in = np.dot(training_input, weights) + bias #Feedforward output:
+  pred_out = sigmoid(pred_in) #Backpropogation
+#Calculating error
+error = pred_out - target_output
+#Going with the formula:
 x = error.sum()
 print('Output',x)
-# Calculating derivative:
-derror_douto = error
-douto_dino = sigmoid_der(out_o)
-# Multiplying individual derivatives:
-deriv = derror_douto * douto_dino #Multiplying with the 3rd individual derivative:
-# Finding the transpose of input_features:
-inputs = input_features.T
-deriv_final = np.dot(inputs,deriv)
-# Updating the weights values:
+
+#Calculating derivative :
+dcost_dpred = error  #dE/dO=O-t(=e)
+dpred_dz = sigmoid_der(pred_out) #dO/du=φ(1-φ)
+ 
+#Multiplying individual derivatives :
+deriv = dcost_dpred * dpred_dz # (dE/dO)(dO/du)
+
+#Finding the transpose of input_features:
+deriv_final = np.dot(training_input.T,deriv)
+#Updating the weights values:
 weights -= alpha * deriv_final #Updating the bias weight value:
 for i in deriv:
  bias -= alpha * i #Check the final bias
-print ("Ending weights after training:", weights)
-print ("Ending Bias after training:", bias) 
+print ("Ending weight after training:", weights)
+print ("Ending bias after training:", bias) 
 
 x1 = np.array ([0., 0., 1., 1.], dtype = np.float32)
 x2 = np.array ([0., 1., 0., 1.], dtype = np.float32)
