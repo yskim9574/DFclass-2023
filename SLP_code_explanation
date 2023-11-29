@@ -1,0 +1,51 @@
+from numpy import array, exp, random, dot   # Define input features :
+
+training_inputs = array([[0,0,1],
+                                [1,1,1],
+                                [1,0,1],
+                                [0,1,1]])
+print (training_inputs.shape)
+print (training_inputs) # Define target output :
+target_output = array([[0,1,1,0]]).T # Reshaping our target output into vector :
+target_output = target_output.reshape(4,1)
+print(target_output.shape)
+print (target_output)
+
+weights = array([[0.1],[0.2],[0.3]])
+print(weights.shape)
+print("Begining weights:",weights) 
+bias = 0.3 
+alpha = 0.05 
+
+def sigmoid(x):
+ return 1/(1+exp(-x)) 
+def sigmoid_der(x):
+ return sigmoid(x)*(1-sigmoid(x)) 
+
+epoch=10000
+for iteration in range(epoch):
+#Feedforward input :
+ pred_in = dot( training_inputs , weights) + bias #Feedforward output :
+ pred_out = sigmoid(pred_in) #Back propogation 
+ error=pred_out - target_output
+
+#Going with the formula :
+ x = error.sum()
+#Calculating derivative :
+ dcost_dpred = error  #dE/dO=O-t(=e)
+ dpred_dz = sigmoid_der(pred_out) #dO/du=φ(1-φ)
+ 
+ #Multiplying individual derivatives :
+ deriv = dcost_dpred * dpred_dz # (dE/dO)(dO/du)
+ #w=w-α(dE/dw)=w-α(dE/dO)(dO/du)(du/dw)
+ deriv_final= dot(training_inputs.T , deriv) 
+ weights -= alpha * deriv_final 
+
+ for i in deriv:
+  bias -= alpha * i  
+print ("Ending weights after training:", weights)
+print ("Ending Bias after training:", bias) 
+new_point = array([1,0,0]) #1st step :
+result1 = dot(new_point, weights) + bias#2nd step :
+result2 = sigmoid(result1) #Print final result
+print("New Output data [1,0,0]:", result2) #Taking inputs 
