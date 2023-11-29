@@ -2,29 +2,40 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.preprocessing import StandardScaler
- 
+
 df = pd.read_csv('ISF.csv')
-print(df)
+print(df.head())
+print(df.tail())
+print(df.shape)
 print(df.columns)
 
 # Distinguish between input and output columns in a data frame
 
+X = df.drop('Spring-back', axis=1) 
 y = df['Spring-back']
-df = df.drop('Spring-back', axis=1) 
-print(df)
+print(X)
+print(y)
 
 # Perform normalization on each column
-w_n = 0.35 
-for column in df.columns:
-    C_min = df[column].min()
-    C_max = df[column].max()
-    D = C_max - C_min
-    df[column] = (df[column] - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
-normalized_df=df
+# X_max X_min normalization. Set w_n value (set to 0 in this example)
+# If w_n = 0, the columns are normalized to values between 0 and 1.
 
-#scaler=StandardScaler() 또는 #scaler=MinMaxScaler()
-#normalized_df = scaler.fit_transform(df)
-print(normalized_df)
+w_n = 0.35 
+for column in X.columns:
+    C_min = X[column].min()
+    C_max = X[column].max()
+    D = C_max - C_min
+    X[column] = (X[column] - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
+normalized_X=X
+
+#scaler=MinMaxScaler() 또는 #scaler=StandardScaler()
+
+#normalized_X = scaler.fit_transform(X)
+
+# Separate input and output values in a normalized data frame
+print(normalized_X)
+print(y)
+
 
 # Separate input and output values in a normalized data frame
 print(normalized_df.round(4))
