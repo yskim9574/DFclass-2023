@@ -8,14 +8,15 @@ def sigmoid_der(x):
     return sigmoid(x)*(1-sigmoid(x))
 
 #Input datasets
-inputs = np.array([[1, 0.666,0.666,0.333],[0.8, 0.666, 0.333,0.333],[0.8,0.333,1,0.666],
+training_inputs = np.array([[1, 0.666,0.666,0.333],[0.8, 0.666, 0.333,0.333],[0.8,0.333,1,0.666],
                    [1,0.666,1,0.666],[0.6, 0.666, 0.666, 0.333]])
 target_output = np.array([[0.9819],[0.9975],[0.9857],[0.9799],[1]])
 
-epochs = 150000
+epochs = 15000
 alpha = 0.1
 inputLayerNeurons, hiddenLayerNeurons, outputLayerNeurons = 4, 3,1
 
+# Constant values for weights and bias are assigned
 hidden_weights=np.array([[0.1, 0.2, 0.3],[0.3,0.4,0.5],[0.4,0.5,0.6],
                          [0.5,0.6,0.7]])
 
@@ -24,7 +25,7 @@ hidden_bias=np.array([[0.1, 0.2, 0.3]])
 output_weights=np.array([[0.5], [0.6], [0.7]])
 output_bias=np.array([[0.3]])
 
-#Random weights and bias initialization
+# Random values for weights and bias are assigned
 #hidden_weights = np.random.uniform(size=(inputLayerNeurons,hiddenLayerNeurons))
 #hidden_bias =np.random.uniform(size=(1,hiddenLayerNeurons))
 #output_weights = np.random.uniform(size=(hiddenLayerNeurons,outputLayerNeurons))
@@ -40,9 +41,9 @@ print("Initial output biases: ",end='')
 print(*output_bias)
 
 #Training algorithm
-for _ in range(epochs):
+for iteration in range(epochs):
 #Forward Propagation
-  hidden_layer_activation = np.dot(inputs,hidden_weights)
+  hidden_layer_activation = np.dot(training_inputs,hidden_weights)
   hidden_layer_activation += hidden_bias
   hidden_layer_output = sigmoid(hidden_layer_activation)
 
@@ -50,7 +51,7 @@ for _ in range(epochs):
   output_layer_activation += output_bias
   predicted_output = sigmoid(output_layer_activation)
 
-  #Backpropagation
+  #Back Propagation
   error = target_output - predicted_output
   d_predicted_output = error * sigmoid_der(predicted_output)
   
@@ -60,7 +61,7 @@ for _ in range(epochs):
   #Updating Weights and Biases
   output_weights += hidden_layer_output.T.dot(d_predicted_output) * alpha
   output_bias += np.sum(d_predicted_output,axis=0,keepdims=True) * alpha
-  hidden_weights += inputs.T.dot(d_hidden_layer) * alpha
+  hidden_weights += training_inputs.T.dot(d_hidden_layer) * alpha
   hidden_bias += np.sum(d_hidden_layer,axis=0,keepdims=True) * alpha
 
 print("Final hidden weights: ",end='')
