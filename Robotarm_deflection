@@ -32,7 +32,7 @@ l2 = 24  # length of link 2 (in)
 E1 = 10e6  # Young's modulus of link 1 (psi)
 E2 = 10e6  # Young's modulus of link 2 (psi)
 I1 = 1.920  # area moment of inertia of link 1 (in^4)
-I2 = 0.289  # area moment of inertia of link 2 (in^4)
+I2 = 0.260  # area moment of inertia of link 2 (in^4)
 P = 1.04  # applied load (lb)
 
 # Theta sets
