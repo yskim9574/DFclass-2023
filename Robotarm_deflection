@@ -19,10 +19,10 @@ def calculate_deflection(theta1, theta2, l1, l2, E1, E2, I1, I2, P):
 
     # Total deflection
     d = -(d2y + d1y + dy)
-    print('theta1, theta2, d', theta1, theta2, d)
-    print('d2y:',d2y)
-    print('d1y:', d1y)
-    print('dy:', dy)
+    print('theta1, theta2, d:', theta1, theta2, round(d, 4))
+    print('d2y:', round(d2y, 4))
+    print('d1y:', round(d1y, 4))
+    print('dy:', round(dy, 4))
  
     return d
 
@@ -32,7 +32,7 @@ l2 = 24  # length of link 2 (in)
 E1 = 10e6  # Young's modulus of link 1 (psi)
 E2 = 10e6  # Young's modulus of link 2 (psi)
 I1 = 1.920  # area moment of inertia of link 1 (in^4)
-I2 = 0.260  # area moment of inertia of link 2 (in^4)
+I2 = 0.270  # area moment of inertia of link 2 (in^4)
 P = 1.04  # applied load (lb)
 
 # Theta sets
@@ -42,4 +42,4 @@ theta_sets = [(0, 0),(0,22.5),(22.5,-22.5),(22.5,-45),(45,0),(45,-22.5), (45,-45
 deflections = [calculate_deflection(theta1, theta2, l1, l2, E1, E2, I1, I2, P) for theta1, theta2 in theta_sets]
 
 for angle_set, deflection in zip(theta_sets, deflections):
-    print(f"For theta1 = {angle_set[0]}°, theta2 = {angle_set[1]}°: Deflection = {deflection} inch")
+    print(f"For theta1 = {angle_set[0]}°, theta2 = {angle_set[1]}°: Deflection = {round(deflection,4)} inch")
