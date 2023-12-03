@@ -1,0 +1,45 @@
+import math
+
+def calculate_deflection(theta1, theta2, l1, l2, E1, E2, I1, I2, P):
+    # Convert angles from degrees to radians for cosine calculations
+    theta1_rad = math.radians(theta1)
+    theta2_rad = math.radians(theta2)
+
+    # Cosines of the angles and their combinations
+    C1 = math.cos(theta1_rad)
+    C2 = math.cos(theta2_rad)
+    C12 = math.cos(theta1_rad + theta2_rad)
+
+    # Calculating individual deflections
+    d2y = -l2**3 * C12**2 * (8 * P) / (24 * E2 * I2)
+    d1y = -(8 * P * l1**3 * C1**2 + 12 * P * l1**2 * l2 * C1 * C12) / (24 * E1 * I1)
+    A = P * l1 * (l2 * C12 + l1 * C1 / 2)
+    B = P * C12 * l2**2 / 2
+    dy = -A * (l1 * C1 + l2 * C12) / (E1 * I1) - B * (l1 * C1 + 2 * l2 * C12) / (E2 * I2)
+
+    # Total deflection
+    d = -(d2y + d1y + dy)
+    print('theta1, theta2, d', theta1, theta2, d)
+    print('d2y:',d2y)
+    print('d1y:', d1y)
+    print('dy:', dy)
+ 
+    return d
+
+# Constants
+l1 = 24  # length of link 1 (in)
+l2 = 24  # length of link 2 (in)
+E1 = 10e6  # Young's modulus of link 1 (psi)
+E2 = 10e6  # Young's modulus of link 2 (psi)
+I1 = 1.920  # area moment of inertia of link 1 (in^4)
+I2 = 0.289  # area moment of inertia of link 2 (in^4)
+P = 1.04  # applied load (lb)
+
+# Theta sets
+theta_sets = [(0, 0),(0,22.5),(22.5,-22.5),(22.5,-45),(45,0),(45,-22.5), (45,-45), (45,-67.5),(67.5,-22.5),(67.5,-45),(90,-22.5),(90,-45)]
+
+# Calculating deflections for each set of angles
+deflections = [calculate_deflection(theta1, theta2, l1, l2, E1, E2, I1, I2, P) for theta1, theta2 in theta_sets]
+
+for angle_set, deflection in zip(theta_sets, deflections):
+    print(f"For theta1 = {angle_set[0]}°, theta2 = {angle_set[1]}°: Deflection = {deflection} inch")
