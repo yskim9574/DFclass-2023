@@ -18,7 +18,7 @@ def calculate_deflection(theta1, theta2, l1, l2, E1, E2, I1, I2, P):
     dy = -A * (l1 * C1 + l2 * C12) / (E1 * I1) - B * (l1 * C1 + 2 * l2 * C12) / (E2 * I2)
 
     # Total deflection
-    d = -(d2y + d1y + dy)
+    d = d2y + d1y + dy
     print('theta1, theta2, d:', theta1, theta2, round(d, 4))
     print('d2y:', round(d2y, 4))
     print('d1y:', round(d1y, 4))
@@ -33,7 +33,7 @@ E1 = 10e6  # Young's modulus of link 1 (psi)
 E2 = 10e6  # Young's modulus of link 2 (psi)
 I1 = 1.920  # area moment of inertia of link 1 (in^4)
 I2 = 0.270  # area moment of inertia of link 2 (in^4)
-P = 1.04  # applied load (lb)
+P = -1.04  # applied load (lb)
 
 # Theta sets
 theta_sets = [(0, 0),(0,22.5),(22.5,-22.5),(22.5,-45),(45,0),(45,-22.5), (45,-45), (45,-67.5),(67.5,-22.5),(67.5,-45),(90,-22.5),(90,-45)]
