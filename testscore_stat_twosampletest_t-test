@@ -1,0 +1,17 @@
+import numpy as np
+from scipy import stats
+
+# Provided data
+class_a_scores = [85, 78, 90, 88, 77, 84, 82, 75, 89, 91]
+class_b_scores = [80, 70, 65, 68, 72, 75, 78, 74, 72]
+
+# Perform the two-sample t-test
+result = stats.ttest_ind(class_a_scores, class_b_scores)
+
+print("t-statistic:", round(result.statistic, 5))
+print("p-value:", round(result.pvalue,5))
+
+if result.pvalue <0.05:
+ print("Reject the null hypothesis, suggesting there is a significant difference between the average scores of Class A and Class B")
+else:
+ print("Fail to reject the null hypothesis, suggesting there is no difference between two scores")
