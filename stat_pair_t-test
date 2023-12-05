@@ -18,8 +18,8 @@ df = n - 1
 
 # p-value
 p_value = 2 * (1 - stats.t.cdf(np.abs(t_statistic), df))
-print(f"t-statistic: {t_statistic}")
-print(f"p-value: {p_value}")
+print(f"t-statistic: {t_statistic.round(6)}")
+print(f"p-value: {p_value.round(6)}")
 # Check against significance level (let's assume 0.05 with 95% confidence level)
 if p_value <0.05:
   print("Reject the null hypothesis, suggesting the training program had an effect.")
