@@ -9,6 +9,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
+from tensorflow.keras.regularizers import l2
 
 df = pd.read_csv('InjectionMolding.csv')
 epochs=500
@@ -37,13 +38,22 @@ print(X)
 X_train, X_test, y_train, y_test = train_test_split( X, y,  test_size=0.3, shuffle=True, random_state=None )
 X_val, X_test, y_val, y_test = train_test_split( X_test, y_test, random_state=None, test_size=0.5 )
 
-#check the difference of the following model
-model = Sequential([
-    Dense(10, input_dim=7, activation='ELU'),
-    Dense(30, activation='ELU'),
-    Dense(1)
- 
-])
+# Create a Sequential model
+model = Sequential()
+
+# Adding a Dense layer with L2 regularization (l2 규제가 있는 경우)
+lambda_value = 0.01  # Regularization strength
+model.add(Dense(units=10, input_dim=7, activation='elu', kernel_regularizer=l2(lambda_value)))
+model.add(Dense(units=30, activation='elu', kernel_regularizer=l2(lambda_value)))
+
+# l2 규제가 없는 경우
+#lambda_value = 0.01  # Regularization strength
+#model.add(Dense(units=10, input_dim=7, activation='elu', kernel_regularizer=l2(lambda_value)))
+#model.add(Dense(units=30, activation='elu', kernel_regularizer=l2(lambda_value)))
+
+
+# Output layer (assuming a regression task)
+model.add(Dense(1))  # No activation for regression output
 
 # Compile the model
 model.compile(optimizer='adam', loss='mean_squared_error')
@@ -56,30 +66,22 @@ y_pred = model.predict(X_test)
 
 def RMSE(y_test, y_pred):
     return np.sqrt(mean_squared_error(y_test, y_pred)) 
-
-print("X_train:")
-print(X_train)
-print("X_val:")
-print(X_val)
-print("x_test:")
-print(X_test)
-print("y_test:")
-print(y_test)
-print("Predictions: ")
-print(y_pred)
+   
+print("X_train:"),print(X_train)
+print("X_val:"),print(X_val)
+print("x_test:"),print(X_test)
+print("y_test:"),print(y_test)
+print("Predictions: "),print(y_pred)
 print("RMSE:", RMSE(y_test, y_pred).round(4))
 
 # Plot loss-epoch curve
 plt.plot(hist.history['loss'], label='Training Loss')
 plt.plot(hist.history['val_loss'], label='Validation Loss')
-plt.title('Model loss')
-plt.ylabel('Loss')
-plt.xlabel('Epoch')
-plt.legend()
+plt.title('Model loss'),plt.ylabel('Loss')
+plt.xlabel('Epoch'),plt.legend()
 plt.show()
 
 # R2 (R square, R^2=sum(yhat – y_mean )^2 /sum(y_test – y_mean)^2)
 from sklearn.metrics import r2_score
 r2_yhat = r2_score(y_test, y_pred)
-print("R:")
-print(r2_yhat)
+print("R:"),print(r2_yhat)
