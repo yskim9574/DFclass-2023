@@ -3,7 +3,6 @@ import numpy as np
 
 def sigmoid (x):
     return 1/(1 + np.exp(-x))
-
 def sigmoid_derivative(x):
     return x * (1 - x)
 
@@ -38,13 +37,13 @@ print(*output_bias)
 #Training algorithm
 for iteration in range(epoch):
   #Forward Propagation
-  hidden_layer_activation = np.dot(training_input,hidden_weights)
-  hidden_layer_activation += hidden_bias
-  hidden_layer_output = sigmoid(hidden_layer_activation)
+  hidden_layer_input = np.dot(training_input,hidden_weights)
+  hidden_layer_input += hidden_bias
+  hidden_layer_output = sigmoid(hidden_layer_input)
 
-  output_layer_activation = np.dot(hidden_layer_output,output_weights)
-  output_layer_activation += output_bias
-  predicted_output = sigmoid(output_layer_activation)
+  output_layer_output = np.dot(hidden_layer_output,output_weights)
+  output_layer_output += output_bias
+  predicted_output = sigmoid(output_layer_output)
 
   #Back Propagation
   error = target_output - predicted_output
@@ -59,13 +58,9 @@ for iteration in range(epoch):
   hidden_weights += training_input.T.dot(d_hidden_layer) * alpha
   hidden_bias += np.sum(d_hidden_layer,axis=0,keepdims=True) * alpha
 
-print("Final hidden weights: ",end='')
-print(*hidden_weights)
-print("Final hidden bias: ",end='')
-print(*hidden_bias)
-print("Final output weights: ",end='')
-print(*output_weights)
-print("Final output bias: ",end='')
-print(*output_bias)
+print("Final hidden weights: ",end=''), print(*hidden_weights)
+print("Final hidden bias: ",end=''), print(*hidden_bias)
+print("Final output weights: ",end=''), print(*output_weights)
+print("Final output bias: ",end=''), print(*output_bias)
 print("Predicted output after training: ",end='')
 print(*predicted_output)  # compare with print(predicted_output)
