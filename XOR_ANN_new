@@ -1,30 +1,29 @@
-
 import numpy as np
 import matplotlib.pyplot as plt
 
 def relu(x):
     return np.maximum(0, x)
-
 def relu_derivative(x):
     return np.where(x > 0, 1, 0)
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
-
 def sigmoid_derivative(x):
     return x * (1 - x)
 
 # Define the dataset for XOR gate
-inputs = np.array([[0, 0],
-                   [0, 1],
-                   [1, 0],
-                   [1, 1]])
+inputs = np.array([[0, 0],[0, 1],[1, 0],[1, 1]])
 outputs = np.array([[0], [1], [1], [0]])
 
 # Initialize weights and biases
 input_size = 2
 hidden_size = 2
 output_size = 1
+
+#w1=np.array([[0.1, 0.2], [0.3,0.4]])
+#b1=np.array([[0.1, 0.2]])
+#w2=np.array([[0.5], [0.6]])
+#b2=np.array([[0.3]])
 
 np.random.seed(0)  # for reproducibility
 w1 = np.random.randn(input_size, hidden_size)
@@ -38,7 +37,7 @@ epochs = 10000
 # List to store loss values
 losses = []
 
-for epoch in range(epochs):
+for iteration in range(epochs):
     # Forward propagation
     hidden_layer_input = np.dot(inputs, w1) + b1
     hidden_layer_output = relu(hidden_layer_input)
@@ -63,15 +62,19 @@ for epoch in range(epochs):
     losses.append(loss)
 
 # Plot the loss values
-plt.plot(losses)
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.title('Loss vs. Epoch')
-plt.show()
-print()
+plt.plot(losses), plt.xlabel('Epoch')
+plt.ylabel('Loss'), plt.title('Loss vs. Epoch')
+plt.show(), print()
 
 # Test the model for the input [1, 0]
 test_input = np.array([[1, 0]])
 hidden_layer_output = relu(np.dot(test_input, w1) + b1)
 predicted_output = sigmoid(np.dot(hidden_layer_output, w2) + b2)
+
 print("output after 10000 epoche:" , predicted_output)
+print("Final hidden weights: ",end=''), print(w1)
+print("Final hidden bias: ",end=''), print(b1)
+print("Final output weights: ",end=''), print(w2)
+print("Final output bias: ",end=''), print(b2)
+print("\nOutput from neural network after 10,000 epochs: ",end='')
+print(predicted_output)
