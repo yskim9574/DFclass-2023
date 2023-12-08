@@ -14,6 +14,7 @@ from tensorflow.keras.regularizers import l2
 df = pd.read_csv('InjectionMolding.csv')
 epochs=500
 # Assuming the target variable is in a column named 'Mass'
+#Subtract the Mass column from the df file, use it as the target variable, and define it as the y column
 
 X = df.drop('Mass', axis=1)
 y = df['Mass']
@@ -47,10 +48,8 @@ model.add(Dense(units=10, input_dim=7, activation='elu', kernel_regularizer=l2(l
 model.add(Dense(units=30, activation='elu', kernel_regularizer=l2(lambda_value)))
 
 # l2 규제가 없는 경우
-#lambda_value = 0.01  # Regularization strength
-#model.add(Dense(units=10, input_dim=7, activation='elu', kernel_regularizer=l2(lambda_value)))
-#model.add(Dense(units=30, activation='elu', kernel_regularizer=l2(lambda_value)))
-
+#model.add(Dense(units=10, input_dim=7, activation='elu'))
+#model.add(Dense(units=30, activation='elu'))
 
 # Output layer (assuming a regression task)
 model.add(Dense(1))  # No activation for regression output
