@@ -1,0 +1,67 @@
+#isolation forest algorithm  to classify observations as normal or anomalous
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import IsolationForest
+import matplotlib.pyplot as plt
+
+df = pd.read_csv('cutting_process_anomaly_detection.csv')
+
+# Isolation Forest model
+model = IsolationForest(n_estimators=100, max_samples='auto', contamination=float(0.1), max_features=1.0)
+model.fit(df)
+
+# Adds an additional column to the dataset that shows whether the row is an outlier (-1) or not (1)
+df['scores'] = model.decision_function(df)
+df['anomaly'] = model.predict(df.drop(columns=['scores']))
+
+print('score:', df['scores'])
+print('anomaly:', df['anomaly'])
+
+# Anomaly visualization (adjust depending on your dataset features)
+plt.figure(figsize=(10, 6))
+plt.scatter(df['cut_speed'], df['cut_force'], color=np.where(df['anomaly'] == 1, 'blue', 'red'))
+plt.xlabel('cutting speed')
+plt.ylabel('cutting force')
+plt.title('Anomaly Detection in Cutting Process')
+plt.show()
+
+iso_forest = IsolationForest(n_estimators=100, contamination=0.15)
+iso_forest.fit(df[['cut_speed', 'cut_force', 'tool_temp']])
+
+# Assuming 'new_data' is a DataFrame containing new observations with the same structure as the training data
+new_data = pd.DataFrame({
+    'cut_speed': [51.4, 56.7,61.7, 45.8, 66.2],  # Replace with actual values
+    'cut_force': [204.4, 215.6, 206.8, 218.4, 241.1],          # Replace with actual values
+    'tool_temp': [98.1, 101.3, 99.7, 112.3, 134.3]       # Replace with actual values
+})
+
+# Use the trained model to predict
+new_data['anomaly'] = iso_forest.predict(new_data)
+print('new_data_anomaly:', new_data['anomaly'])
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+# Create a 3D scatter plot
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+
+# Plotting data points
+normal = df[df['anomaly'] == 1]
+anomaly = df[df['anomaly'] == -1]
+
+ax.scatter(normal['cut_speed'], normal['cut_force'], normal['tool_temp'], c='blue', marker='o', label='Normal')
+ax.scatter(anomaly['cut_speed'], anomaly['cut_force'], anomaly['tool_temp'], c='red', marker='^', label='Anomaly')
+
+# Axis labels
+ax.set_xlabel('Cutting Speed')
+ax.set_ylabel('Cutting Force')
+ax.set_zlabel('Tool Temperature')
+
+# Legend
+ax.legend()
+
+# Show plot
+plt.show()
+
+# The 'anomaly' column will now contain -1 for anomalies and 1 for normal instances
