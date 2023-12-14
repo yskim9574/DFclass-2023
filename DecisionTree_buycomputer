@@ -1,0 +1,35 @@
+import matplotlib.pyplot as plt
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+import pandas as pd
+
+# Data
+data = {
+    'Age': ['youth', 'youth', 'middle', 'senior', 'senior', 'senior', 'middle', 
+            'youth', 'youth', 'senior', 'youth', 'middle', 'middle', 'senior'],
+    'Income': ['high', 'high', 'high', 'medium', 'low', 'low', 'low', 
+               'medium', 'low', 'medium', 'medium', 'medium', 'high', 'medium'],
+    'Student': ['no', 'no', 'no', 'no', 'yes', 'yes', 'yes', 
+                'no', 'yes', 'yes', 'yes', 'no', 'yes', 'no'],
+    'Buy Computer': ['no', 'no', 'yes', 'yes', 'yes', 'no', 'yes', 
+                     'no', 'yes', 'yes', 'yes', 'yes', 'yes', 'no']
+}
+
+# Convert data to DataFrame
+df = pd.DataFrame(data)
+
+# Map string values to integers
+mapping = {'youth': 0, 'middle': 1, 'senior': 2, 'high': 0, 'medium': 1, 'low': 2, 'no': 0, 'yes': 1}
+df = df.applymap(lambda s: mapping.get(s) if s in mapping else s)
+
+# Define features and target variable
+X = df.drop('Buy Computer', axis=1)
+y = df['Buy Computer']
+
+# Create Decision Tree Classifier
+clf = DecisionTreeClassifier(criterion='gini')
+clf.fit(X, y)
+
+# Plot the Decision Tree
+plt.figure(figsize=(9,7))
+plot_tree(clf, filled=True, feature_names=['Age', 'Income', 'Student'], class_names=['No', 'Yes'])
+plt.show()
