@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.ensemble import IsolationForest
+import matplotlib.pyplot as plt
 
 # Given dataset
 X = np.array([[45, 100], [57, 120], [63, 90], [65, 145], [80, 110], [85, 75], 
@@ -30,3 +31,20 @@ print('anomaly _score:[180, 152], [110,52],[45,100]')
 print(0.5-isolation_forest.decision_function([[180, 152], [110,52],[45,100]]). round(4))
 print('decision_function')
 print(isolation_forest.decision_function(X). round(4))
+
+# Plotting the data points
+plt.figure(figsize=(7,5))
+plt.scatter(X[:, 0], X[:, 1], color='blue', label='Normal Data')
+
+# Highlighting the anomalies
+anomalies = X[is_anomaly == -1]
+plt.scatter(anomalies[:, 0], anomalies[:, 1], color='red', label='Anomalies')
+
+# Adding labels and title
+plt.xlabel('Feature 1')
+plt.ylabel('Feature 2')
+plt.title('Isolation Forest Anomaly Detection')
+plt.legend()
+
+# Show the plot
+plt.show()
