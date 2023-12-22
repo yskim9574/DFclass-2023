@@ -1,0 +1,32 @@
+import numpy as np
+from sklearn.ensemble import IsolationForest
+
+# Given dataset
+X = np.array([[45, 100], [57, 120], [63, 90], [65, 145], [80, 110], [85, 75], 
+              [90, 130], [100, 120], [110, 95], [115, 70], [110, 52], [95, 154], [180, 152]])
+
+# Create the IsolationForest model
+isolation_forest = IsolationForest(random_state=42)
+
+# Fit the model
+isolation_forest.fit(X)
+
+# Predict the anomaly scores for the dataset (converted to the range of 0 to 1)
+anomaly_scores = 0.5 - isolation_forest.decision_function(X)
+print('anomaly_scores:')
+print(anomaly_scores. round(4))
+
+# Predict if a data point is an outlier
+is_anomaly = isolation_forest.predict(X)
+print('is_anomaly')
+print(is_anomaly)
+
+# Combine the dataset, converted anomaly scores, and whether it's an outlier
+results = np.column_stack((X, anomaly_scores, is_anomaly))
+
+# Filter and show the anomalies with their converted scores
+anomalies_with_converted_scores = results[results[:, -1] == -1, :-1]
+print('anomaly _score:[180, 152], [110,52],[45,100]')
+print(0.5-isolation_forest.decision_function([[180, 152], [110,52],[45,100]]). round(4))
+print('decision_function')
+print(isolation_forest.decision_function(X). round(4))
