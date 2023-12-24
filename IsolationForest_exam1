@@ -1,6 +1,6 @@
+import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.ensemble import IsolationForest
-import matplotlib.pyplot as plt
 
 # Given dataset
 X = np.array([[45, 100], [57, 120], [63, 90], [65, 145], [80, 110], [85, 75], 
@@ -11,7 +11,6 @@ isolation_forest = IsolationForest(random_state=42)
 
 # Fit the model
 isolation_forest.fit(X)
-
 # Predict the anomaly scores for the dataset (converted to the range of 0 to 1)
 anomaly_scores = 0.5 - isolation_forest.decision_function(X)
 print('anomaly_scores:')
@@ -32,18 +31,21 @@ print(0.5-isolation_forest.decision_function([[180, 152], [110,52],[45,100]]). r
 print('decision_function')
 print(isolation_forest.decision_function(X). round(4))
 
-# Plotting the data points
-plt.figure(figsize=(7,5))
-plt.scatter(X[:, 0], X[:, 1], color='blue', label='Normal Data')
+# Plotting
+plt.figure(figsize=(7, 5))
 
-# Highlighting the anomalies
+# Plot normal data as circles
+normal_data = X[is_anomaly == 1]
+plt.scatter(normal_data[:, 0], normal_data[:, 1], color='blue', label='Normal Data', marker='o')
+
+# Plot anomalies as stars
 anomalies = X[is_anomaly == -1]
-plt.scatter(anomalies[:, 0], anomalies[:, 1], color='red', label='Anomalies')
+plt.scatter(anomalies[:, 0], anomalies[:, 1], color='red', label='Anomalies', marker='*')
 
 # Adding labels and title
 plt.xlabel('Feature 1')
 plt.ylabel('Feature 2')
-plt.title('Isolation Forest Anomaly Detection')
+plt.title('Isolation Forest Anomaly Detection with Different Shapes')
 plt.legend()
 
 # Show the plot
