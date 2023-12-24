@@ -4,18 +4,18 @@ import pandas as pd
 
 # Data
 data = {
-   'age': ['youth', 'youth', 'youth', 'youth', 'middle', 
-       'senior', 'senior'],
-   'student': ['yes', 'yes', 'yes','no', 'no', 'yes', 'yes'],
-   'credit-rating': ['fair', 'fair', 'fair', 'fair', 'excellent', 'fair', 'excellent'],
-   'buy computer': ['yes', 'yes', 'no', 'no', 'yes', 'no', 'yes']
+'age': ['youth', 'youth', 'youth', 'youth', 'middle', 
+'senior', 'senior'],
+'student': ['yes', 'yes', 'yes','no', 'no', 'yes', 'yes'],
+'credit-rating': ['fair', 'fair', 'fair', 'fair', 'excellent', 'fair', 'excellent'],
+'buy computer': ['yes', 'yes', 'no', 'no', 'yes', 'no', 'yes']
 }
 
 # Convert data to DataFrame
 df = pd.DataFrame(data)
 
 # Mapping string values to integers
-mapping = {'youth': 0, 'middle': 1, 'senior': 2,  'no': 0, 'yes': 1, 'fair': 0, 'excellent': 1, 'no': 0, 'yes': 1}
+mapping = {'youth': 0, 'middle': 1, 'senior': 2, 'no': 0, 'yes': 1, 'fair': 0, 'excellent': 1, 'no': 0, 'yes': 1}
 df = df.applymap(lambda s: mapping.get(s) if s in mapping else s)
 
 # Define features and target variable
@@ -29,6 +29,7 @@ clf.fit(X, y)
 # Plot the Decision Tree
 plt.figure(figsize=(6,7))
 plot_tree(clf, filled=True, feature_names=['age', 'student', 'credit-rating'], class_names=['No', 'Yes'])
+#plot_tree(clf, filled=False, feature_names=['age', 'student', 'credit-rating'], class_names=['No', 'Yes'])
 plt.show()
 
 #clf.fit(X, y)
