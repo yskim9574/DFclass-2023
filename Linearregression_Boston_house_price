@@ -6,7 +6,9 @@ from sklearn.preprocessing import StandardScaler
 df = pd.read_csv('boston.csv') 
 print(df[:5].round(3))
 
-# control the number of decimal places by using **.round()
+# corr_matrix is used to compute pairwise correlation(Pearson) of columns, excluding NA/null values
+# 없는 데이터및 영인 데이터를 제외하고 매트릭스의 상관관계를 계산
+
 corr_matrix=df.corr()
 print(corr_matrix.round(2))
 
