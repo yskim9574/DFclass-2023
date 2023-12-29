@@ -41,10 +41,12 @@ new_data = pd.DataFrame({
 
 # Use the trained model to predict
 new_data['scores'] = 0.5-iso_forest.decision_function(new_data)
-print('new_data_scores:', new_data['scores'])
+print('new_data_scores:')
+print( new_data['scores'])
 
 new_data['anomaly'] = iso_forest.predict(new_data.drop(columns=['scores']))
-print('new_data_anomaly:', new_data['anomaly'])
+print('new_data_anomaly:')
+print( new_data['anomaly'])
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
