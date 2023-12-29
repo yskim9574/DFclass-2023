@@ -4,7 +4,7 @@ from sklearn.ensemble import IsolationForest
 
 # Given dataset
 X = np.array([[45, 100], [57, 120], [63, 90], [65, 145], [80, 110], [85, 75], 
-              [90, 130], [100, 120], [110, 95], [115, 70], [110, 52], [95, 154], [180, 152]])
+              [90, 130], [100, 120], [110, 95], [115, 70], [110, 52], [95, 160], [180, 152]])
 
 # Create the IsolationForest model
 isolation_forest = IsolationForest(random_state=42)
