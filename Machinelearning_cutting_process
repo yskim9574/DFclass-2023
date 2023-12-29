@@ -5,14 +5,18 @@ from sklearn.ensemble import IsolationForest
 import matplotlib.pyplot as plt
 
 df = pd.read_csv('cutting_process_anomaly_detection.csv')
+print(df.head())
 
 # Isolation Forest model
 model = IsolationForest(n_estimators=100, max_samples='auto', contamination=float(0.1), max_features=1.0)
 model.fit(df)
 
 # Adds an additional column to the dataset that shows whether the row is an outlier (-1) or not (1)
-df['scores'] = model.decision_function(df)
+df['scores'] = 0.5-model.decision_function(df)
+print(df.head())
+
 df['anomaly'] = model.predict(df.drop(columns=['scores']))
+print(df.head())
 
 print('score:', df['scores'])
 print('anomaly:', df['anomaly'])
@@ -30,13 +34,16 @@ iso_forest.fit(df[['cut_speed', 'cut_force', 'tool_temp']])
 
 # Assuming 'new_data' is a DataFrame containing new observations with the same structure as the training data
 new_data = pd.DataFrame({
-    'cut_speed': [51.4, 56.7,61.7, 45.8, 66.2],  # Replace with actual values
-    'cut_force': [204.4, 215.6, 206.8, 218.4, 241.1],          # Replace with actual values
-    'tool_temp': [98.1, 101.3, 99.7, 112.3, 134.3]       # Replace with actual values
+    'cut_speed': [51.4, 56.7, 61.7, 45.8, 66.2],  # Replace with actual values
+    'cut_force': [204.4, 215.6, 206.8, 218.4, 241.1],  # Replace with actual values
+    'tool_temp': [98.1, 101.3, 99.7, 112.3, 134.3]   # Replace with actual values
 })
 
 # Use the trained model to predict
-new_data['anomaly'] = iso_forest.predict(new_data)
+new_data['scores'] = 0.5-iso_forest.decision_function(new_data)
+print('new_data_scores:', new_data['scores'])
+
+new_data['anomaly'] = iso_forest.predict(new_data.drop(columns=['scores']))
 print('new_data_anomaly:', new_data['anomaly'])
 
 import matplotlib.pyplot as plt
@@ -60,6 +67,9 @@ ax.set_zlabel('Tool Temperature')
 
 # Legend
 ax.legend()
+
+# Show plot
+plt.show()
 
 # Show plot
 plt.show()
