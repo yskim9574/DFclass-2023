@@ -1,0 +1,47 @@
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+
+# Load the dataset
+df = pd.read_csv('boston.csv') 
+print(df[:5].round(3))
+
+# control the number of decimal places by using **.round()
+corr_matrix=df.corr()
+print(corr_matrix.round(2))
+
+# Assume all columns except 'MEDV' are features and 'MEDV' is the target
+#Create a new DataFrame X containing all columns of the original DataFrame df except the 'MEDV' column
+X = df.drop('MEDV', axis=1)
+y = df['MEDV']
+#print(X[:5])
+
+# Standardize the features
+# All features have a mean of 0 and a standard deviation of 1, so they can be compared directly.
+scaler = StandardScaler()
+X = scaler.fit_transform(X)
+#print(X[:5].round(3))
+
+# Create a Linear Regression model and fit it on the standardized data
+model = LinearRegression()
+model.fit(X, y)
+
+# Get coefficients and intercept
+coefficients = model.coef_
+intercept = model.intercept_
+
+# Print the explicit form of the price including all parameters
+price_equation = "MEDV = "
+if isinstance(X, pd.DataFrame):
+ for feature, coef in zip(X.columns, coefficients):
+  price_equation += f"({coef:.2f} * {feature}) + "
+price_equation += f"{intercept:.2f}"
+print(price_equation)
+
+# Predictions for the top 5 rows
+top_5_predictions = model.predict(X[:5])
+
+# Print actual and predicted values
+print("\nActual vs Predicted for the Top 5 Rows:")
+for actual, predicted in zip(y[:5], top_5_predictions):
+    print(f"Actual: {actual}, Predicted: {predicted:.2f}")
