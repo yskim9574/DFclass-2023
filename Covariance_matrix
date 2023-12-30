@@ -64,6 +64,24 @@ plt.ylabel('Transformed Y')
 plt.tight_layout()
 plt.show()
 
-#check the eigenvalue decomposition
-A=eigenvectors@diagonal_matrix@eigenvectors.T
-print(A.round(3))
+# Plotting the data and the eigenvectors
+#plt.figure(figsize=(6, 6))
+#plt.scatter(data[:, 0], data[:, 1], color='blue', label='Data Points')
+
+# Origin of the eigenvectors
+origin = [0, 0]  # Using (0,0) as the origin for simplicity
+
+# Plotting the eigenvectors
+for vec in eigenvectors.T:
+    plt.quiver(*origin, *vec, color='r', scale=1, scale_units='xy', angles='xy')
+
+plt.xlim(-1, 1)
+plt.ylim(0, 2)
+plt.xlabel('X')
+plt.ylabel('Y')
+plt.title('Data Points and Eigenvector Directions')
+plt.axhline(0, color='black',linewidth=0.5)
+plt.axvline(0, color='black',linewidth=0.5)
+plt.grid(color='gray', linestyle='--', linewidth=0.5)
+plt.legend()
+plt.show()
