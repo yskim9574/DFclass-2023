@@ -1,0 +1,92 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+
+#If the data is given by **.csv in pandas, data changes into numpy. 
+df = pd.read_csv('Covaiance.csv')
+
+# Calculating the standard deviation of x and y
+std_dev_x = df['x'].std()
+std_dev_y = df['y'].std()
+print("\nStandard Deviation of x (s_x):", std_dev_x.round(3))
+print("Standard Deviation of y (s_y):", std_dev_y.round(3))
+
+# Calculating the covariance matrix
+covariance_matrix = df.cov()
+
+# Perform eigenvalue decomposition
+eigenvalues, eigenvectors = np.linalg.eig(covariance_matrix)
+
+# Calculating Pearson correlation matrix using numpy
+corr_matrix =df.corr()
+
+#In a Pearson correlation matrix, the terms (1,1) and (2,2)- 
+# which represent the correlation of a variable with itself — are always 1.0. 
+
+# Displaying the results
+print("Covariance Matrix:")
+print(covariance_matrix.round(3))
+print("\nEigenvalues:")
+print(eigenvalues.round(3))
+
+# Creating a diagonal matrix with the eigenvalues
+diagonal_matrix = np.diag(eigenvalues)
+
+print("Diagonal Matrix:")
+print(diagonal_matrix.round(3))
+print("\nEigenvectors:")
+print(eigenvectors.round(3))
+print("\nPearson_correlation_matrix :")
+print(corr_matrix .round(3))
+
+# Applying the Pearson correlation matrix to transform the data
+transformed_df = df @ corr_matrix 
+#transformed_df = df @ covariance_matrix
+print('\ntransformed_df:')
+print(transformed_df)
+
+# Plotting the original data directly from DataFrame
+plt.figure(figsize=(10,5))
+plt.subplot(1, 2, 1)
+
+# Assuming the DataFrame has columns 'X' and 'Y'
+plt.scatter(df['x'], df['y'], color='blue')
+plt.title('Original Data')
+plt.xlabel('X')
+plt.ylabel('Y')
+
+# Add more to the plot as needed
+
+plt.show()
+
+# Transformed data plot
+plt.subplot(1, 2, 2)
+plt.scatter(transformed_df['x'], transformed_df['y'], color='red')
+plt.title('Transformed Data')
+plt.xlabel('Transformed X')
+plt.ylabel('Transformed Y')
+
+plt.tight_layout()
+plt.show()
+
+# Plotting the data and the eigenvectors
+plt.figure(figsize=(5, 5))
+#plt.scatter(data[:, 0], data[:, 1], color='blue', label='Data Points')
+
+# Origin of the eigenvectors
+origin = [0, 0]  # Using (0,0) as the origin for simplicity
+
+# Plotting the eigenvectors
+for vec in eigenvectors.T:
+    plt.quiver(*origin, *vec, color='r', scale=1, scale_units='xy', angles='xy')
+
+plt.xlim(-1, 1)
+plt.ylim(0, 2)
+plt.xlabel('X')
+plt.ylabel('Y')
+plt.title('Data Points and Eigenvector Directions')
+plt.axhline(0, color='black',linewidth=0.5)
+plt.axvline(0, color='black',linewidth=0.5)
+plt.grid(color='gray', linestyle='--', linewidth=0.5)
+plt.legend()
+plt.show()
