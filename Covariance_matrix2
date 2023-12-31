@@ -2,8 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 
-#If the data is given by **.csv in pandas, data changes into numpy. 
-df = pd.read_csv('Covaiance.csv')
+#If the data is given by **.csv in pandas
+df = pd.read_csv('Covariance.csv')
 
 # Calculating the standard deviation of x and y
 std_dev_x = df['x'].std()
@@ -74,11 +74,11 @@ plt.figure(figsize=(5, 5))
 #plt.scatter(data[:, 0], data[:, 1], color='blue', label='Data Points')
 
 # Origin of the eigenvectors
-origin = [0, 0]  # Using (0,0) as the origin for simplicity
+origin = [0, 0] # Using (0,0) as the origin for simplicity
 
 # Plotting the eigenvectors
 for vec in eigenvectors.T:
-    plt.quiver(*origin, *vec, color='r', scale=1, scale_units='xy', angles='xy')
+  plt.quiver(*origin, *vec, color='r', scale=1, scale_units='xy', angles='xy')
 
 plt.xlim(-1, 1)
 plt.ylim(0, 2)
