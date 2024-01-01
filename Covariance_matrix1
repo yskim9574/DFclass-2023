@@ -42,6 +42,8 @@ print(corr_matrix .round(3))
 
 # Identifying the principal component (eigenvector with the largest eigenvalue)
 principal_component = eigenvectors[:, np.argmax(eigenvalues)]
+print("principal_component:")
+print(principal_component.round(3))
 
 # Projecting the data onto the principal component
 projected_data = data @ principal_component
@@ -55,6 +57,13 @@ plt.scatter(data[:, 0], data[:, 1], color='blue')
 plt.title('Original Data')
 plt.xlabel('X')
 plt.ylabel('Y')
+
+
+# Add the line of principal direction
+# Calculate the line endpoints based on the principal component
+line_x = np.array([np.min(data[:, 0]), np.max(data[:, 0])])
+line_y = line_x * (principal_component[1] / principal_component[0])
+plt.plot(line_x, line_y, color='green', linestyle='--')
 
 # Projected data plot
 plt.subplot(1, 2, 2)
