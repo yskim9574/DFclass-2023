@@ -40,9 +40,11 @@ print(eigenvectors.round(3))
 print("\nPearson_correlation_matrix :")
 print(corr_matrix .round(3))
 
-# Applying the Pearson correlation matrix to transform the data
-transformed_data = data @ corr_matrix 
-#transformed_data = data @ covariance_matrix
+# Identifying the principal component (eigenvector with the largest eigenvalue)
+principal_component = eigenvectors[:, np.argmax(eigenvalues)]
+
+# Projecting the data onto the principal component
+projected_data = data @ principal_component
 
 # Plotting the original and transformed data
 plt.figure(figsize=(10, 5))
@@ -54,19 +56,19 @@ plt.title('Original Data')
 plt.xlabel('X')
 plt.ylabel('Y')
 
-# Transformed data plot
+# Projected data plot
 plt.subplot(1, 2, 2)
-plt.scatter(transformed_data[:, 0], transformed_data[:, 1], color='red')
-plt.title('Transformed Data')
-plt.xlabel('Transformed X')
-plt.ylabel('Transformed Y')
+plt.scatter(projected_data, np.zeros_like(projected_data), color='red')
+plt.title('Projected Data (1D)')
+plt.xlabel('Projected X')
+plt.yticks([])
 
 plt.tight_layout()
 plt.show()
 
-# Plotting the data and the eigenvectors
-#plt.figure(figsize=(6, 6))
-#plt.scatter(data[:, 0], data[:, 1], color='blue', label='Data Points')
+#check the eigenvalue decomposition
+A=eigenvectors@diagonal_matrix@eigenvectors.T
+print(A.round(3))
 
 # Origin of the eigenvectors
 origin = [0, 0]  # Using (0,0) as the origin for simplicity
