@@ -1,0 +1,57 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+
+# Given data points (x, y)
+data = np.array([(1, 1), (2, 2.5), (3, 2), (4, 4), (5, 3.5), (6, 3), (7, 3.5)])
+print(data)
+
+# Standardizing the data
+scaler = StandardScaler()
+standardized_data = scaler.fit_transform(data)
+print(standardized_data.round(3))
+
+# Calculating the standard deviations of each variable in standardized data
+std_dev_x_standardized = np.std(standardized_data[:, 0], ddof=1)  # Standard deviation of x
+std_dev_y_standardized = np.std(standardized_data[:, 1], ddof=1)  # Standard deviation of y
+print(std_dev_x_standardized.round(3), std_dev_y_standardized.round(3))
+
+# Calculating the covariance matrix for standardized data
+covariance_matrix_standardized = np.cov(standardized_data.T)
+print(covariance_matrix_standardized.round(3))
+
+# Perform eigenvalue decomposition for standardized data
+eigenvalues_standardized, eigenvectors_standardized = np.linalg.eig(covariance_matrix_standardized)
+
+# Identifying the principal component (eigenvector with the largest eigenvalue) for standardized data
+principal_component_standardized = eigenvectors_standardized[:, np.argmax(eigenvalues_standardized)]
+print(principal_component_standardized.round(3))
+
+# Projecting the standardized data onto the principal component
+projected_data_standardized = standardized_data @ principal_component_standardized
+print(projected_data_standardized.round(3))
+
+# Plotting the original and transformed data for standardized data
+plt.figure(figsize=(10, 5))
+
+# Original data plot (standardized data)
+plt.subplot(1, 2, 1)
+plt.scatter(standardized_data[:, 0], standardized_data[:, 1], color='blue')
+plt.title('Standardized Data')
+plt.xlabel('Standardized X')
+plt.ylabel('Standardized Y')
+
+# Add the line of principal direction for standardized data
+line_x_standardized = np.array([np.min(standardized_data[:, 0]), np.max(standardized_data[:, 0])])
+line_y_standardized = line_x_standardized * (principal_component_standardized[1] / principal_component_standardized[0])
+plt.plot(line_x_standardized, line_y_standardized, color='green', linestyle='--')
+
+# Projected data plot (standardized data - 1D)
+plt.subplot(1, 2, 2)
+plt.scatter(projected_data_standardized, np.zeros_like(projected_data_standardized), color='red')
+plt.title('Projected Data (Standardized Data - 1D)')
+plt.xlabel('Projected X')
+plt.yticks([])
+
+plt.tight_layout()
+plt.show()
