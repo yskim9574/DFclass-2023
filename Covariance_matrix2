@@ -4,6 +4,7 @@ import pandas as pd
 
 #If the data is given by **.csv in pandas
 df = pd.read_csv('Covariance.csv')
+print(df)
 
 # Calculating the standard deviation of x and y
 std_dev_x = df['x'].std()
@@ -39,20 +40,20 @@ principal_component = eigenvectors[:, np.argmax(eigenvalues)]
 print("principal_component:"), print(principal_component.round(3))
 
 # Projecting the data onto the principal component
-projected_data = data @ principal_component
+projected_data = df @ principal_component
 print('\nprojected_data:'), print(projected_data.round(3))
 # Plotting the original and transformed data
 plt.figure(figsize=(10, 5))
 
 # Original data plot
 plt.subplot(1, 2, 1)
-plt.scatter(data[:, 0], data[:, 1], color='blue')
+plt.scatter(df['x'], df['y'], color='blue')  # Corrected indexing
 plt.title('Original Data')
 plt.xlabel('X'), plt.ylabel('Y')
 
+
 # Add the line of principal direction
-# Calculate the line endpoints based on the principal component
-line_x = np.array([np.min(data[:, 0]), np.max(data[:, 0])])
+line_x = np.array([np.min(df['x']), np.max(df['x'])])  # Corrected indexing
 line_y = line_x * (principal_component[1] / principal_component[0])
 plt.plot(line_x, line_y, color='green', linestyle='--')
 
@@ -84,3 +85,4 @@ plt.axvline(0, color='black',linewidth=0.5)
 plt.grid(color='gray', linestyle='--', linewidth=0.5)
 plt.legend()
 plt.show()
+
