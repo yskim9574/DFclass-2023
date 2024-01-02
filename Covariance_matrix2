@@ -1,14 +1,25 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
-#If the data is given by **.csv in pandas
+# Reading data from CSV
 df = pd.read_csv('Covariance.csv')
+print('data:')
 print(df)
 
-# Calculating the standard deviation of x and y
-std_dev_x = df['x'].std()
-std_dev_y = df['y'].std()
+# Standardize the data
+scaler = StandardScaler()
+standardized_data = scaler.fit_transform(df)
+
+# Convert standardized data back to DataFrame
+df_standardized = pd.DataFrame(standardized_data, columns=df.columns)
+print("\nStandardized Data:")
+print(df_standardized)
+
+# Calculating the standard deviation
+std_dev_x = df_standardized['x'].std()
+std_dev_y = df_standardized['y'].std()
 print("\nStandard Deviation of x (s_x):", std_dev_x.round(3))
 print("Standard Deviation of y (s_y):", std_dev_y.round(3))
 
