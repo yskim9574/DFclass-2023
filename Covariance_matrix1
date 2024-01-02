@@ -47,6 +47,8 @@ print(principal_component.round(3))
 
 # Projecting the data onto the principal component
 projected_data = data @ principal_component
+print('\nprojected_data:')
+print(projected_data.round(3))
 
 # Plotting the original and transformed data
 plt.figure(figsize=(10, 5))
@@ -57,7 +59,6 @@ plt.scatter(data[:, 0], data[:, 1], color='blue')
 plt.title('Original Data')
 plt.xlabel('X')
 plt.ylabel('Y')
-
 
 # Add the line of principal direction
 # Calculate the line endpoints based on the principal component
