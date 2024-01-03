@@ -4,31 +4,40 @@ from sklearn.preprocessing import StandardScaler
 
 # Given data points (x, y)
 data = np.array([(1, 1), (2, 2.5), (3, 2), (4, 4), (5, 3.5), (6, 3), (7, 3.5)])
-print(data)
+print('data:'), print(data)
 
 # Standardizing the data
 scaler = StandardScaler()
 standardized_data = scaler.fit_transform(data)
-print(standardized_data.round(3))
+print('standardized_data:'), print(standardized_data.round(3))
 
 # Calculating the standard deviations of each variable in standardized data
 std_dev_x_standardized = np.std(standardized_data[:, 0], ddof=1)  # Standard deviation of x
 std_dev_y_standardized = np.std(standardized_data[:, 1], ddof=1)  # Standard deviation of y
-print(std_dev_x_standardized.round(3), std_dev_y_standardized.round(3))
+print('std_dev x,y:', std_dev_x_standardized.round(3),std_dev_y_standardized.round(3))
 
 # Calculating the covariance matrix for standardized data
 covariance_matrix_standardized = np.cov(standardized_data.T)
+print('covariance_matrix_standardized:')
 print(covariance_matrix_standardized.round(3))
 
 # Perform eigenvalue decomposition for standardized data
 eigenvalues_standardized, eigenvectors_standardized = np.linalg.eig(covariance_matrix_standardized)
+print('eigenvalues_standardized:')
+print(eigenvectors_standardized)
+
+
+# Creating a diagonal matrix with the eigenvalues
+diagonal_matrix = np.diag(eigenvalues_standardized)
 
 # Identifying the principal component (eigenvector with the largest eigenvalue) for standardized data
 principal_component_standardized = eigenvectors_standardized[:, np.argmax(eigenvalues_standardized)]
+print('principal_component_standardized:')
 print(principal_component_standardized.round(3))
 
 # Projecting the standardized data onto the principal component
 projected_data_standardized = standardized_data @ principal_component_standardized
+print('projected_data_standardized:')
 print(projected_data_standardized.round(3))
 
 # Plotting the original and transformed data for standardized data
@@ -55,3 +64,16 @@ plt.yticks([])
 
 plt.tight_layout()
 plt.show()
+
+#check the eigenvalue decomposition
+A=eigenvectors_standardized@diagonal_matrix@eigenvectors_standardized.T
+print('Covariance_matrix_standardized :')
+print( A.round(3))
+
+# Assume projected_data_standardized is your data projected onto the first principal component
+# Approximating the original data from the projected data
+approx_original_data = projected_data_standardized[:, np.newaxis] @ principal_component_standardized[np.newaxis, :]
+approx_original_data = scaler.inverse_transform(approx_original_data)  
+print('approx_original_data:')
+print(approx_original_data.round(3))
+# Note: This will not perfectly reconstruct the original data
