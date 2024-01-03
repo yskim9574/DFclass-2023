@@ -70,7 +70,7 @@ plt.show()
 
 #check the eigenvalue decomposition
 A=eigenvectors_standardized@diagonal_matrix@eigenvectors_standardized.T
-print('Covariance_matrix_standardized :')
+print('Check Covariance_matrix_standardized :')
 print( A.round(3))
 
 # Assume projected_data_standardized is your data projected onto the first principal component
