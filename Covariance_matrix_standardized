@@ -26,8 +26,9 @@ print(covariance_matrix_standardized.round(3))
 # Perform eigenvalue decomposition for standardized data
 eigenvalues_standardized, eigenvectors_standardized = np.linalg.eig(covariance_matrix_standardized)
 print('eigenvalues_standardized:')
+print(eigenvalues_standardized)
+print('eigenvectors_standardized:')
 print(eigenvectors_standardized)
-
 
 # Creating a diagonal matrix with the eigenvalues
 diagonal_matrix = np.diag(eigenvalues_standardized)
@@ -79,3 +80,19 @@ approx_original_data = scaler.inverse_transform(approx_original_data)
 print('approx_original_data:')
 print(approx_original_data.round(3))
 # Note: This will not perfectly reconstruct the original data
+
+# Origin of the eigenvectors
+origin = [0, 0] # Using (0,0) as the origin for simplicity
+
+# Plotting the eigenvectors
+for vec in eigenvectors_standardized.T:
+  plt.quiver(*origin, *vec, color='r', scale=1, scale_units='xy', angles='xy')
+
+plt.xlim(-1, 1), plt.ylim(0, 2)
+plt.xlabel('X'), plt.ylabel('Y')
+plt.title('Data Points and Eigenvector Directions')
+plt.axhline(0, color='black',linewidth=0.5)
+plt.axvline(0, color='black',linewidth=0.5)
+plt.grid(color='gray', linestyle='--', linewidth=0.5)
+plt.legend()
+plt.show()
