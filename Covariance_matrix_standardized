@@ -5,6 +5,8 @@ from sklearn.preprocessing import StandardScaler
 # Given data points (x, y)
 data = np.array([(1, 1), (2, 2.5), (3, 2), (4, 4), (5, 3.5), (6, 3), (7, 3.5)])
 print('data:'), print(data)
+print(np.mean(data[:,0]).round(3),np.std(data[:,0]).round(3))
+print(np.mean(data[:,1]).round(3),np.std(data[:,1]).round(3))
 
 # Standardizing the data
 scaler = StandardScaler()
