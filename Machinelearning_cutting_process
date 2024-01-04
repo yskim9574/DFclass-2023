@@ -18,8 +18,7 @@ print(df.head().round(3))
 df['anomaly'] = model.predict(df.drop(columns=['scores']))
 print(df.head().round(3))
 
-print('score:', df['scores'].round(3))
-print('anomaly:', df['anomaly'].round(3))
+print('score:', df['scores'].round(3)), print('anomaly:', df['anomaly'].round(3))
 
 # Plot non-anomalous points (blue circles)
 plt.scatter(df.loc[df['anomaly'] == 1, 'cut_speed'], 
@@ -31,8 +30,7 @@ plt.scatter(df.loc[df['anomaly'] == -1, 'cut_speed'],
             df.loc[df['anomaly'] == -1, 'cut_force'], 
             color='red', marker='^', label='normal (Circle)')
 
-plt.xlabel('cutting speed')
-plt.ylabel('cutting force')
+plt.xlabel('cutting speed'), plt.ylabel('cutting force')
 plt.title('Anomaly Detection in Cutting Process')
 plt.show()
 
@@ -48,8 +46,7 @@ new_data = pd.DataFrame({
 
 # Use the trained model to predict
 new_data['scores'] = 0.5-iso_forest.decision_function(new_data)
-print('new_data_scores:')
-print( new_data['scores'].round(3))
+print('new_data_scores:'), print( new_data['scores'].round(3))
 
 new_data['anomaly'] = iso_forest.predict(new_data.drop(columns=['scores']))
 print('new_data_anomaly:')
@@ -70,16 +67,11 @@ ax.scatter(normal['cut_speed'], normal['cut_force'], normal['tool_temp'], c='blu
 ax.scatter(anomaly['cut_speed'], anomaly['cut_force'], anomaly['tool_temp'], c='red', marker='^', label='Anomaly')
 
 # Axis labels
-ax.set_xlabel('Cutting Speed')
-ax.set_ylabel('Cutting Force')
+ax.set_xlabel('Cutting Speed'), ax.set_ylabel('Cutting Force')
 ax.set_zlabel('Tool Temperature')
 
 # Legend
 ax.legend()
-
-# Show plot
-plt.show()
-
 # Show plot
 plt.show()
 
