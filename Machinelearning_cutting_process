@@ -5,7 +5,7 @@ from sklearn.ensemble import IsolationForest
 import matplotlib.pyplot as plt
 
 df = pd.read_csv('cutting_process_anomaly_detection.csv')
-print(df.head())
+print(df.head().round(3))
 
 # Isolation Forest model
 model = IsolationForest(n_estimators=100, max_samples='auto', contamination=float(0.1), max_features=1.0)
@@ -13,17 +13,24 @@ model.fit(df)
 
 # Adds an additional column to the dataset that shows whether the row is an outlier (-1) or not (1)
 df['scores'] = 0.5-model.decision_function(df)
-print(df.head())
+print(df.head().round(3))
 
 df['anomaly'] = model.predict(df.drop(columns=['scores']))
-print(df.head())
+print(df.head().round(3))
 
-print('score:', df['scores'])
-print('anomaly:', df['anomaly'])
+print('score:', df['scores'].round(3))
+print('anomaly:', df['anomaly'].round(3))
 
-# Anomaly visualization (adjust depending on your dataset features)
-plt.figure(figsize=(10, 6))
-plt.scatter(df['cut_speed'], df['cut_force'], color=np.where(df['anomaly'] == 1, 'blue', 'red'))
+# Plot non-anomalous points (blue circles)
+plt.scatter(df.loc[df['anomaly'] == 1, 'cut_speed'], 
+            df.loc[df['anomaly'] == 1, 'cut_force'], 
+            color='blue', marker='o', label='Anomaly (Triangle)')
+
+# Plot anomalous points (red triangles)
+plt.scatter(df.loc[df['anomaly'] == -1, 'cut_speed'], 
+            df.loc[df['anomaly'] == -1, 'cut_force'], 
+            color='red', marker='^', label='normal (Circle)')
+
 plt.xlabel('cutting speed')
 plt.ylabel('cutting force')
 plt.title('Anomaly Detection in Cutting Process')
@@ -42,11 +49,11 @@ new_data = pd.DataFrame({
 # Use the trained model to predict
 new_data['scores'] = 0.5-iso_forest.decision_function(new_data)
 print('new_data_scores:')
-print( new_data['scores'])
+print( new_data['scores'].round(3))
 
 new_data['anomaly'] = iso_forest.predict(new_data.drop(columns=['scores']))
 print('new_data_anomaly:')
-print( new_data['anomaly'])
+print( new_data['anomaly'].round(3))
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
