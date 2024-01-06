@@ -1,0 +1,52 @@
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+
+# Example dataset with labels (0 for normal, 1 for anomaly)
+X = np.array([[45, 100], [57, 120], [63, 90], [65, 145], [80, 110], [85, 75], 
+              [90, 130], [100, 120], [110, 95], [115, 70], [110, 52], [95, 160], [180, 152]])
+y = np.array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1])  # Labels for each point in X
+
+# Create the RandomForestClassifier model
+model = RandomForestClassifier(random_state=42)
+
+# Fit the model
+model.fit(X, y)
+
+# Predict the labels for the dataset
+predicted_labels = model.predict(X)
+
+# New data points for classification
+new_data = np.array([[47,120], [110,120],[135,80], [142, 155]])
+
+# Predict the labels for the new dataset
+new_predicted_labels = model.predict(new_data)
+
+# Plotting
+plt.figure(figsize=(7, 5))
+
+# Plot existing normal data as circles
+normal_data = X[predicted_labels == 0]
+plt.scatter(normal_data[:, 0], normal_data[:, 1], color='blue', label='Normal Data', marker='o')
+
+# Plot predicted anomalies as stars
+predicted_anomalies = X[predicted_labels == 1]
+plt.scatter(predicted_anomalies[:, 0], predicted_anomalies[:, 1], color='red', label='Predicted Anomalies', marker='*')
+
+# Plot new data points with predicted labels
+print("new_data label for [47,120], [110,120],[135,80], [142, 155] is:")
+for i, point in enumerate(new_data):
+    label = new_predicted_labels[i]
+    plt.scatter(point[0], point[1], color='green' if label == 0 else 'orange', marker='x', s=100, label=f'New Data {i+1}')
+    print(label)
+    
+# Adding labels and title
+plt.xlabel('Feature 1')
+plt.ylabel('Feature 2')
+plt.title('Random Forest Classification with New Data')
+plt.legend()
+
+# Show the plot
+plt.show()
+
+# The 'anomaly' column will now contain 1 for anomalies and 0 for normal instances
