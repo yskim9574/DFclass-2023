@@ -26,7 +26,7 @@ results = np.column_stack((X, scores, anomaly))
 
 # Filter and show the anomalies with their converted scores
 anomalies_with_converted_scores = results[results[:, -1] == -1, :-1]
-print('score:[180, 152], [110,52], [45,100], [95, 160],')
+print('score for [180, 152], [110,52], [45,100], [95, 160] is,')
 print(0.5-model.decision_function([[180, 152], [110,52],[45,100], [95, 160],]). round(4))
 print('decision_function')
 print(model.decision_function(X). round(4))
