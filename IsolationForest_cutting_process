@@ -23,12 +23,12 @@ print('score:', df['scores'].round(3)), print('anomaly:', df['anomaly'].round(3)
 # Plot non-anomalous points (blue circles)
 plt.scatter(df.loc[df['anomaly'] == 1, 'cut_speed'], 
             df.loc[df['anomaly'] == 1, 'cut_force'], 
-            color='blue', marker='o', label='Anomaly (Triangle)')
+            color='blue', marker='o', label='Normal (Circle)')
 
 # Plot anomalous points (red triangles)
 plt.scatter(df.loc[df['anomaly'] == -1, 'cut_speed'], 
             df.loc[df['anomaly'] == -1, 'cut_force'], 
-            color='red', marker='^', label='normal (Circle)')
+            color='red', marker='^', label='Anomaly (Triangle)')
 
 plt.xlabel('cutting speed'), plt.ylabel('cutting force')
 plt.title('Anomaly Detection in Cutting Process')
