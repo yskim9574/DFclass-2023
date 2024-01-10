@@ -1,0 +1,44 @@
+
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.preprocessing import LabelEncoder
+import pandas as pd
+import numpy as np
+
+# Sample data
+data = {
+    'Chest Pain': ['Yes', 'No', 'Yes', 'Yes', 'No', 'No', 'Yes', 'Yes'],
+    'Blocked Arteries': ['Yes', 'Yes', 'No', 'Yes', 'Yes', 'Yes', 'No', 'Yes'],
+    'Patient Weight': [205, 180, 210, 167, 156, 125, 168, 172],
+    'Heart Disease': ['Yes', 'Yes', 'Yes', 'Yes', 'No', 'No', 'No', 'No']
+}
+
+# Convert to DataFrame
+df = pd.DataFrame(data)
+
+# Convert categorical variables to numerical
+label_encoder = LabelEncoder()
+df['Chest Pain'] = label_encoder.fit_transform(df['Chest Pain'])
+df['Blocked Arteries'] = label_encoder.fit_transform(df['Blocked Arteries'])
+df['Heart Disease'] = label_encoder.fit_transform(df['Heart Disease'])
+
+# Features and target
+X = df.drop('Heart Disease', axis=1)
+y = df['Heart Disease']
+
+# Initialize AdaBoostClassifier (AdaBoost 알고리즘을 사용하는 경우)
+model = AdaBoostClassifier(n_estimators=100)
+
+# Initialize GradientBoostingClassifier (GBM 알고리즘을 사용하는 경우)
+# model = GradientBoostingClassifier(n_estimators=100)
+
+# Train the model
+model.fit(X, y)
+
+# Test data
+test_data = np.array([[1, 1, 182]])  # 1 for 'Yes', 170 for weight
+
+# Predict
+prediction = model.predict(test_data)
+prediction_result = 'Yes' if prediction[0] == 1 else 'No'
+
+print(f"Predicted Heart Disease: {prediction_result}")
