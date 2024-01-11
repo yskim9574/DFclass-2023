@@ -83,12 +83,13 @@ print("Top 5 Most Effective Features for Breast Cancer Prediction (by absolute c
 print(most_effective_features.head(6).round(3)) 
 
 # Make predictions on the test set
-predictions = classifier.predict(test_X)
+prediction_testX = classifier.predict(test_X)
 
 # Calculate accuracy, precision, and recall
-accuracy = accuracy_score(test_y, predictions)
-precision = precision_score(test_y, predictions)
-recall = recall_score(test_y, predictions)
+accuracy = accuracy_score(test_y, prediction_testX)
+precision = precision_score(test_y, prediction_testX)
+recall = recall_score(test_y, prediction_testX)
+
 
 # Print the metrics
 print(f"Accuracy: {accuracy:.2f}")
