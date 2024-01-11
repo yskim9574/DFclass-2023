@@ -1,0 +1,81 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.ensemble import AdaBoostClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, accuracy_score
+
+# Load the dataset
+cancer = load_breast_cancer()
+
+# Create a DataFrame for the feature data
+X = pd.DataFrame(cancer.data, columns=cancer.feature_names)
+
+# Directly use the binary-encoded target variable
+y = pd.Series(cancer.target, name='Target')
+
+# Add the target variable to the DataFrame
+cancer_df = X.copy()
+cancer_df['Target'] = y
+
+# Display the first few rows of the combined DataFrame
+print(cancer_df.head())
+
+# Calculate the correlation matrix
+corr = cancer_df.corr()
+
+# Plotting the heatmap
+plt.figure(figsize=(20, 20))
+sns.heatmap(corr, vmax=0.8, linewidths=0.01, square=True, annot=True, cmap='YlGnBu', fmt='.2f')
+plt.title('Feature Correlation')
+
+# Getting the counts of positive and negative instances
+unique, counts = np.unique(cancer.target, return_counts=True)
+target_counts = dict(zip(cancer.target_names[unique], counts))
+
+print("Number of instances in each class:")
+print("malignant(양성), benign(음성)")
+print(target_counts)
+
+for i,feature in enumerate(cancer.feature_names):
+ print(f'feature{(i+1)} : ',feature)
+
+encoder = LabelEncoder()
+binary_encoded_y = pd.Series(encoder.fit_transform(y))
+
+train_X, test_X, train_y, test_y = train_test_split(X, binary_encoded_y, random_state = 1)
+
+classifier = AdaBoostClassifier(DecisionTreeClassifier(max_depth=1), n_estimators=200)
+classifier.fit(train_X, train_y)
+print("classifier:", classifier)
+
+# Example test data (replace with real data)
+new_patient_data = [17.99, 10.38, 122.8, 1001.0, 0.1184, 0.2776, 0.3001, 0.1471, 0.2419, 0.07871,1.095, 0.9053, 8.589, 153.4, 0.006399, 0.04904, 0.05373, 0.01587, 0.03003, 0.006193, 25.38, 17.33, 184.6, 2019.0, 0.1622, 0.6656, 0.7119, 0.2654, 0.4601, 0.1189]
+
+new_patient_df = pd.DataFrame([new_patient_data], columns=cancer.feature_names)
+
+# Make a prediction
+prediction = classifier.predict(new_patient_df)
+
+# Decoding the prediction
+predicted_label = cancer.target_names[prediction][0]
+print("The predicted class for the new patient is:", predicted_label)
+
+# Get feature importances from the classifier
+feature_importances = classifier.feature_importances_
+
+# Create a DataFrame for easier visualization
+features_df = pd.DataFrame({
+    'Feature': cancer.feature_names,
+    'Importance': feature_importances
+})
+
+# Sort features based on the absolute correlation with the target
+most_effective_features = corr['Target'].abs().sort_values(ascending=False)
+
+# Display the top 5 most effective features
+print("Top 5 Most Effective Features for Breast Cancer Prediction (by absolute correlation):")
+print(most_effective_features.head(6).round(3)) 
