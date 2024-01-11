@@ -47,7 +47,7 @@ corr_matrix=df.corr()
 # show correlation matrix for the DataFrame with Correlation coefficients range from -1 to 1, 
  
 corr_order=df.corr().loc[:'LSTAT','MEDV'].abs().sort_values(ascending=False)
-print(corr_order)
+print(corr_order.head(6).round(3))
 
 # plot heatmap
 plt.figure(figsize=(10,10))
