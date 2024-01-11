@@ -7,6 +7,8 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, accuracy_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.preprocessing import LabelEncoder
 
 # Load the dataset
 cancer = load_breast_cancer()
@@ -79,3 +81,16 @@ most_effective_features = corr['Target'].abs().sort_values(ascending=False)
 # Display the top 5 most effective features
 print("Top 5 Most Effective Features for Breast Cancer Prediction (by absolute correlation):")
 print(most_effective_features.head(6).round(3)) 
+
+# Make predictions on the test set
+predictions = classifier.predict(test_X)
+
+# Calculate accuracy, precision, and recall
+accuracy = accuracy_score(test_y, predictions)
+precision = precision_score(test_y, predictions)
+recall = recall_score(test_y, predictions)
+
+# Print the metrics
+print(f"Accuracy: {accuracy:.2f}")
+print(f"Precision: {precision:.2f}")
+print(f"Recall: {recall:.2f}")
