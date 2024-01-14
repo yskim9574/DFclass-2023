@@ -32,12 +32,12 @@ plot_tree(model, filled=True, feature_names=['age', 'student', 'credit-rating'],
 #plot_tree(model, filled=False, feature_names=['age', 'student', 'credit-rating'], class_names=['No', 'Yes'])
 plt.show()
 
-#clf.fit(X, y)
+#model.fit(X, y)
 #plt.figure(figsize=(6,7))
 #plot_tree(model, filled=True, feature_names=['Age', 'Student', 'credit-rating'], class_names=['No', 'Yes'],proportion=True, rounded=True, precision=2)
 #plt.show()
 
-#clf.fit(X, y)
+#model.fit(X, y)
 #plt.figure(figsize=(6,7))
 #plot_tree(clf, filled=True, feature_names=['Age', 'Student', 'credit-rating'], class_names=['No', 'Yes'],proportion=True, rounded=True, precision=2)
 #plt.show()
