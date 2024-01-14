@@ -4,7 +4,7 @@ import pandas as pd
 
 # Data
 data = {
-'age': ['youth', 'youth', 'youth', 'youth', 'middle', 
+'age': ['youth', 'youth', 'youth', 'youth', 'middle',
 'senior', 'senior'],
 'student': ['yes', 'yes', 'yes','no', 'no', 'yes', 'yes'],
 'credit-rating': ['fair', 'fair', 'fair', 'fair', 'excellent', 'fair', 'excellent'],
@@ -23,14 +23,19 @@ X = df.drop('buy computer', axis=1)
 y = df['buy computer']
 
 # Create and train Decision Tree Classifier
-clf = DecisionTreeClassifier(criterion='gini', random_state=0)
-clf.fit(X, y)
+model = DecisionTreeClassifier(criterion='gini', random_state=0)
+model.fit(X, y)
 
 # Plot the Decision Tree
 plt.figure(figsize=(6,7))
-plot_tree(clf, filled=True, feature_names=['age', 'student', 'credit-rating'], class_names=['No', 'Yes'])
-#plot_tree(clf, filled=False, feature_names=['age', 'student', 'credit-rating'], class_names=['No', 'Yes'])
+plot_tree(model, filled=True, feature_names=['age', 'student', 'credit-rating'], class_names=['No', 'Yes'])
+#plot_tree(model, filled=False, feature_names=['age', 'student', 'credit-rating'], class_names=['No', 'Yes'])
 plt.show()
+
+#clf.fit(X, y)
+#plt.figure(figsize=(6,7))
+#plot_tree(model, filled=True, feature_names=['Age', 'Student', 'credit-rating'], class_names=['No', 'Yes'],proportion=True, rounded=True, precision=2)
+#plt.show()
 
 #clf.fit(X, y)
 #plt.figure(figsize=(6,7))
