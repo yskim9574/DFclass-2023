@@ -33,13 +33,18 @@ plt.scatter(normal_data[:, 0], normal_data[:, 1], color='blue', label='Normal Da
 predicted_anomalies = X[predicted_labels == 1]
 plt.scatter(predicted_anomalies[:, 0], predicted_anomalies[:, 1], color='red', label='Predicted Anomalies', marker='*')
 
-# Plot new data points with predicted labels
-print("new_data label for [47,120], [110,120],[135,80], [142, 155] is:")
 for i, point in enumerate(new_data):
     label = new_predicted_labels[i]
-    plt.scatter(point[0], point[1], color='green' if label == 0 else 'orange', marker='x', s=100, label=f'New Data {i+1}')
+    if label == 0:  # Normal data
+        marker_shape = 'o'  # Circle
+        color = 'green'
+    else:  # Anomaly
+        marker_shape = '*'  # Star
+        color = 'red'
+
+    plt.scatter(point[0], point[1], color=color, marker=marker_shape, s=100, label=f'New Data {i+1}')
     print(label)
-    
+
 # Adding labels and title
 plt.xlabel('Feature 1')
 plt.ylabel('Feature 2')
@@ -48,5 +53,3 @@ plt.legend()
 
 # Show the plot
 plt.show()
-
-# The 'anomaly' column will now contain 1 for anomalies and 0 for normal instances
