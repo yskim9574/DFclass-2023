@@ -39,5 +39,5 @@ plt.show()
 
 #model.fit(X, y)
 #plt.figure(figsize=(6,7))
-#plot_tree(clf, filled=True, feature_names=['Age', 'Student', 'credit-rating'], class_names=['No', 'Yes'],proportion=True, rounded=True, precision=2)
+#plot_tree(model, filled=True, feature_names=['Age', 'Student', 'credit-rating'], class_names=['No', 'Yes'],proportion=True, rounded=True, precision=2)
 #plt.show()
