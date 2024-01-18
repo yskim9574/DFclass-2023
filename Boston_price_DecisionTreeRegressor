@@ -1,0 +1,57 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings('ignore') 
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.tree import plot_tree
+
+# Load the dataset
+df = pd.read_csv('boston.csv')
+X = df.drop('MEDV', axis=1)
+y = df['MEDV']
+
+# Create a DecisionTreeRegressor model
+clf = DecisionTreeRegressor(            
+        criterion='squared_error',        
+         splitter='best',             
+         max_depth=3,            
+         min_samples_leaf=5,            
+         random_state=100        
+      )
+
+clf.fit(X, y)
+
+# Predict target values
+y_pred = clf.predict(X)
+
+# Print the predictions and compare with the real value for the first few rows
+print('Predict:', y_pred[:5].round(3))
+print('Target:', y[:5].round(3))
+
+# Get feature importances
+importances = clf.feature_importances_
+
+# Get the feature names
+feature_names = X.columns
+
+# Create a series with feature importances and names, then sort it
+feature_importances = pd.Series(importances, index=feature_names).sort_values(ascending=False)
+
+# Display the top 5 important features
+print("Top 5 Important Features:")
+print(feature_importances.head(5).round(4))
+
+# Variable Importance
+for i, col in enumerate(X.columns):
+      print(f'{col} importance : {clf.feature_importances_[i]}') 
+print(clf.get_params()) 
+print('accuracy : ', clf.score(X, y)) 
+
+# Plotting the decision tree
+fig = plt.figure(figsize=(15, 10), facecolor='white')
+plot_tree(clf,
+          feature_names=X.columns,
+          filled=True  # Removed class_names
+         )
+plt.show()
