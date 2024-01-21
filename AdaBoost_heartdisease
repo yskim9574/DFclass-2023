@@ -36,7 +36,7 @@ model = AdaBoostClassifier(n_estimators=100)
 model.fit(X, y)
 
 # Test data
-test_data = np.array([[1, 1, 182]])  # 1 for 'Yes', 170 for weight
+test_data = np.array([[1, 1, 182]])  # 1 for 'Yes'
 
 # Predict
 prediction = model.predict(test_data)
