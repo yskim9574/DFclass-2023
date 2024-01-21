@@ -1,0 +1,45 @@
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.preprocessing import OneHotEncoder
+import pandas as pd
+
+# Creating the dataset
+data = {
+    "Height": [1.6, 1.6, 1.5, 1.8, 1.5, 1.4],
+    "Favorite Color": ["Blue", "Green", "Blue", "Red", "Green", "Blue"],
+    "Gender": ["Male", "Female", "Female", "Male", "Male", "Female"],
+    "Observed Weight": [88, 76, 56, 73, 77, 57]
+}
+
+df = pd.DataFrame(data)
+
+# One-hot encoding for categorical variables
+encoder = OneHotEncoder()
+encoded_categorical = encoder.fit_transform(df[["Favorite Color", "Gender"]])
+encoded_feature_names = encoder.get_feature_names_out(["Favorite Color", "Gender"])
+
+# Creating the final DataFrame with all features
+encoded_df = pd.DataFrame(encoded_categorical.toarray(), columns=encoded_feature_names)
+encoded_df["Height"] = df["Height"]
+
+# Target variable
+target = df["Observed Weight"]
+
+# Training the gradient boosting model
+model = GradientBoostingRegressor()
+model.fit(encoded_df, target)
+
+# Preparing the data for prediction
+new_data = pd.DataFrame({
+    "Height": [1.72],
+    "Favorite Color": ["Green"],
+    "Gender": ["Female"]
+})
+
+# Transforming the new data using the same encoder
+new_encoded_data = encoder.transform(new_data[["Favorite Color", "Gender"]])
+new_encoded_df = pd.DataFrame(new_encoded_data.toarray(), columns=encoded_feature_names)
+new_encoded_df["Height"] = new_data["Height"]
+
+# Predicting the weight
+predicted_weight = model.predict(new_encoded_df)
+print(predicted_weight[0].round(3)
