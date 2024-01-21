@@ -1,5 +1,6 @@
 
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import AdaBoostClassifier
 from sklearn.preprocessing import LabelEncoder
 import pandas as pd
 import numpy as np
