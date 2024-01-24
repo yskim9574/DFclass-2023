@@ -1,0 +1,67 @@
+from sklearn.model_selection import train_test_split
+from sklearn.svm import SVR
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import mean_squared_error
+import pandas as pd
+import numpy as np
+
+# Creating the dataset
+data = {
+    "Strategy": ["CP"] * 9 + ["SPI"] * 9 + ["RAD"] * 9,
+    "Tool Diameter (mm)": [8, 8, 8, 10, 10, 10, 12, 12, 12] * 3,
+    "Step Size z(mm)": [0.4, 0.8, 1.2] * 9,
+    "Label": ["OK", "Break", "Break", "OK", "OK", "OK", "OK", "OK", "OK",
+               "Break", "Break", "Break", "Break", "OK", "OK", "OK", "OK", "OK",
+               "OK", "OK", "Break", "OK", "OK", "OK", "OK", "OK", "OK"]
+}
+df = pd.DataFrame(data)
+print(df)
+
+# Encoding the 'Strategy' variable
+encoder = LabelEncoder()
+df['Strategy'] = encoder.fit_transform(df['Strategy'])
+
+# Convert 'Result' to a numerical format (OK: 1, Break: 0)
+df['Label'] = df['Label'].map({'OK': 1, 'Break': 0})
+
+# Separating features and target variable
+features = df[["Strategy", "Tool Diameter (mm)", "Step Size z(mm)"]]
+target = df["Label"]
+
+# Splitting the dataset into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.2, random_state=42)
+
+#### Training the SVR model with RBF kernel
+# You can tune C and gamma to optimize performance
+svr_model = SVR(kernel='rbf', C=1.0, gamma='scale')
+#svr_model = SVR()
+svr_model.fit(X_train, y_train)
+
+# Making predictions on the testing set
+y_pred = svr_model.predict(X_test)
+
+# Evaluating the model
+mse = mean_squared_error(y_test, y_pred)
+rmse = np.sqrt(mse)
+
+print(f"Root Mean Squared Error: {rmse}")
+print("y_test:", y_test)
+print("y_pred:", y_pred.round(3))
+
+#### Training the Random Forest Regressor model
+from sklearn.ensemble import RandomForestRegressor
+
+# Creating a Random Forest Regressor model
+rf_model = RandomForestRegressor(random_state=42)
+rf_model.fit(X_train, y_train)
+
+# Making predictions on the testing set
+y_pred_rf = rf_model.predict(X_test)
+
+# Evaluating the model
+mse_rf = mean_squared_error(y_test, y_pred_rf)
+rmse_rf = np.sqrt(mse_rf)
+
+print(f"Root Mean Squared Error (Random Forest): {rmse_rf}")
+print("y_test:", y_test)
+print("y_pred_rf:", y_pred_rf.round(3))
