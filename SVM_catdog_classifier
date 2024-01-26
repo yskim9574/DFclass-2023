@@ -1,0 +1,54 @@
+from sklearn.svm import SVC
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Dataset: [size, weight]
+X = np.array([[1, 2],[1.4,3.6],[1.7,4.7] ,[2, 3],[2.7,2.7],[2.5,3.3],[2.2,4.3],  [3, 3],[4.5,5.3], [5, 4],[5.5,5],[5,6.7],[5.6,6.2],[6.2,5.8],[6.2,4.3], [6, 7],[6.3,5.5], [7, 6]])
+y = np.array([0,0, 0, 0,0,0,0,0,1,1, 1,1, 1,1,1,1,1,1])  # 0: Cat, 1: Dog
+
+# Train an SVM Classifier
+svm_classifier = SVC(kernel='linear')
+svm_classifier.fit(X, y)
+
+# Plotting data points
+# Cats (Class 0) as black triangles
+plt.scatter(X[y == 0, 0], X[y == 0, 1], c='black', marker='^', label='Cat')
+
+# Dogs (Class 1) as red circles
+plt.scatter(X[y == 1, 0], X[y == 1, 1], c='red', marker='o', label='Dog')
+
+plt.xlabel('Size')
+plt.ylabel('Weight')
+plt.title('Animal Classification')
+
+# Create a grid to plot decision boundaries
+ax = plt.gca()
+xlim = ax.get_xlim()
+ylim = ax.get_ylim()
+
+# Create grid to evaluate model
+xx = np.linspace(xlim[0], xlim[1], 30)
+yy = np.linspace(ylim[0], ylim[1], 30)
+YY, XX = np.meshgrid(yy, xx)
+xy = np.vstack([XX.ravel(), YY.ravel()]).T
+Z = svm_classifier.decision_function(xy).reshape(XX.shape)
+
+# Plot decision boundary and margins
+ax.contour(XX, YY, Z, colors='k', levels=[-1, 0, 1], alpha=0.5, linestyles=['--', '-', '--'])
+
+# Add a legend
+plt.legend()
+
+plt.show()
+
+# Data for a new animal
+A = 4  
+B = 5  
+new_animal = np.array([[A, B]])
+
+# Use the trained SVM classifier to make a prediction
+predicted_class = svm_classifier.predict(new_animal)
+
+# Output the result
+animal_class = "Dog" if predicted_class == 1 else "Cat"
+print(f"The animal with size {A} and weight {B} is predicted to be a {animal_class}.")
