@@ -1,0 +1,89 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from sklearn.decomposition import PCA
+
+# Set random seed for reproducibility
+np.random.seed(42)
+
+# Number of data points per cluster
+num_points = 40
+
+# Generating random data for each cluster
+cluster1 = np.random.rand(num_points, 3) * 5  # Random data in the range [0, 5)
+cluster2 = np.random.rand(num_points, 3) * 5 + np.array([8, 0, 0])  # Shifted cluster
+cluster3 = np.random.rand(num_points, 3) * 5 + np.array([0, 8, 0])  # Shifted cluster
+
+# Combine data points from all clusters
+data = np.vstack([cluster1, cluster2, cluster3])
+
+# Performing PCA to reduce dimensionality to 2D
+pca = PCA(n_components=2)
+pca.fit(data)
+components = pca.components_
+
+# Plotting the original 3D dataset with the plane containing two principal component axes
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+# Scatter plot for each cluster
+ax.scatter(cluster1[:, 0], cluster1[:, 1], cluster1[:, 2], marker='^', label='Cluster 1')
+ax.scatter(cluster2[:, 0], cluster2[:, 1], cluster2[:, 2], marker='o', label='Cluster 2')
+ax.scatter(cluster3[:, 0], cluster3[:, 1], cluster3[:, 2], marker='s', label='Cluster 3')
+
+# Plotting the plane containing two principal component axes with grid
+xx, yy = np.meshgrid(np.linspace(min(data[:,0]), max(data[:,0]), 10), np.linspace(min(data[:,1]), max(data[:,1]), 10))
+z = (-components[0,0]*xx - components[1,0]*yy) / components[0,1]
+ax.plot_surface(xx, yy, z, alpha=0.5, color='gray')
+
+# Plotting grid
+for i in range(0, len(z), 2):
+    ax.plot(xx[i], yy[i], z[i], color='black', alpha=0.2)  # Rows
+    ax.plot(xx[:,i], yy[:,i], z[:,i], color='black', alpha=0.2)  # Columns
+
+# Projecting principal component axes onto the plane
+origin = pca.mean_
+pc1_end_proj = origin + np.dot(pca.explained_variance_[0], components[0])
+pc2_end_proj = origin + np.dot(pca.explained_variance_[1], components[1])
+
+# Plotting the projected principal component axes
+#ax.plot([origin[0], pc1_end_proj[0]], [origin[1], pc1_end_proj[1]], [origin[2], pc1_end_proj[2]], color='red', label='Principal Component 1')
+#ax.plot([origin[0], pc2_end_proj[0]], [origin[1], pc2_end_proj[1]], [origin[2], pc2_end_proj[2]], color='blue', label='Principal Component 2')
+
+# Setting labels and title
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+ax.set_zlabel('Z')
+ax.set_title('Original 3D Dataset with PCA Plane and Principal Components')
+
+# Adding legend
+ax.legend()
+plt.show()
+
+
+# Applying PCA to reduce dimensionality to 2D
+pca = PCA(n_components=2)
+data_2d = pca.fit_transform(data)
+
+# Plotting the 2D dataset
+plt.figure(figsize=(8, 6))
+
+# Scatter plot for each cluster with different marker shapes
+plt.scatter(data_2d[:num_points, 0], data_2d[:num_points, 1], marker='^', label='Cluster 1')
+plt.scatter(data_2d[num_points:2*num_points, 0], data_2d[num_points:2*num_points, 1], marker='o', label='Cluster 2')
+plt.scatter(data_2d[2*num_points:, 0], data_2d[2*num_points:, 1], marker='s', label='Cluster 3')
+
+# Setting labels and title
+plt.xlabel('Principal Component 1')
+plt.ylabel('Principal Component 2')
+plt.title('2D Dataset Clustering after PCA')
+
+# Adding legend
+plt.legend()
+
+# Adjusting the scale of the axes
+plt.xlim(-10, 10) # Adjust the limits as needed to concentrate the clusters
+plt.ylim(-10, 10)
+
+plt.grid(True)
+plt.show()
