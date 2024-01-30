@@ -1,0 +1,85 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.svm import SVR
+from sklearn.metrics import mean_squared_error
+import pandas as pd
+
+# Load and preprocess the data
+x_filename = '/content/drive/My Drive/cutting.csv'
+y_filename = '/content/drive/My Drive/cuttingforce.csv'
+
+x_df = pd.read_csv(x_filename)
+y_df = pd.read_csv(y_filename)
+
+# Convert DataFrame to numpy array
+x = x_df.values
+y = y_df.values.flatten()  # Flatten y to a 1D array
+
+# Split the data into training and testing sets
+x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3, random_state=None)
+x_val, x_test, y_val, y_test = train_test_split(x_test, y_test, random_state=None, test_size=0.5)
+
+# Define the SVR model
+svr = SVR(kernel='rbf', C=100, gamma=0.1, epsilon=0.1)
+
+# Train the SVR model
+svr.fit(x_train, y_train)
+
+# Model evaluation
+yhat_train = svr.predict(x_train)
+y_pred = svr.predict(x_test)
+y_val_hat = svr.predict(x_val)
+
+# Calculate RMSE
+def RMSE(y_true, y_pred):
+    return np.sqrt(mean_squared_error(y_true, y_pred))
+
+# Calculate R^2
+from sklearn.metrics import r2_score
+r2_train = r2_score(y_train, yhat_train)
+
+print("RMSE:", RMSE(y_train, yhat_train).round(3))
+print("R2:", r2_train.round(3))
+
+# Plot the figures
+plt.figure(figsize=(6,8))
+
+# Plot y_train vs yhat curve
+plt.subplot(2, 2, 1)
+plt.scatter(y_train, yhat_train)
+plt.title('y_train vs yhat')
+plt.xlabel('y_train')
+plt.ylabel('yhat')
+
+# Plot loss-epoch curve
+plt.subplot(2, 2, 2)
+# SVR does not have epochs, so there is no loss curve to plot
+
+# Plot y_test vs y_pred curve
+plt.subplot(2, 2, 3)
+plt.scatter(y_test, y_pred)
+plt.title('y_test vs y_pred')
+plt.xlabel('y_test')
+plt.ylabel('y_pred')
+
+
+# Plot y_val vs y_val_hat curve
+plt.subplot(2, 2, 4)
+plt.scatter(y_val, y_val_hat)
+plt.title('y_val vs y_val_hat')
+plt.xlabel('y_val')
+plt.ylabel('y_val_hat')
+
+# Given cases
+cases = np.array([[0.5, 0.833, 0.15], [0.75, 0.5, 0.3], [0.75, 0.3333, 0.6],
+                  [0.5,0.8333,0.3],[0.75,0.6666,0.9],[0.25,0.8333,0.6],[0.75,0.3333,0.3],
+                   [0.75,0.25,0.3],[0.5,0.5,0.9]])
+
+# Predict the cutting force values for the given cases
+predicted_values = svr.predict(cases)
+
+# Print the predicted values
+print("Predicted cutting force values:")
+for i, case in enumerate(cases):
+    print("Case {}: {:.3f}".format(i+1, predicted_values[i]))
