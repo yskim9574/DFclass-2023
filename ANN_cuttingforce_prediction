@@ -1,0 +1,108 @@
+# 절삭가공의 절삭하중 문제
+# Input datasets by F.Kara, K. Aslantas, A. Cicek, ANN and multiple regression method-based modelling of cutting forces in orthogonal machining of AISI 316L stainless steel, Neural Computing and Applications (2014) 10.1007/s00521-014-1721-y
+
+# 입력 60가지 상태, 입력층 3개 뉴런, 첫번째 은닉층에 10개의 뉴런, 두번째 은닉층에 30개의 뉴런, 출력층에 1개 뉴런 사용
+
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+import pandas as pd
+epochs=500
+
+# Load and preprocess the data
+x_filename = '/content/drive/My Drive/cutting.csv'
+y_filename = '/content/drive/My Drive/cuttingforce.csv'
+
+x_df = pd.read_csv(x_filename)
+y_df = pd.read_csv(y_filename)
+
+# Convert DataFrame to numpy array
+x = x_df.values
+y = y_df.values
+
+# Split the data into training and testing sets
+x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3, shuffle=True, random_state=None)
+x_val, x_test, y_val, y_test = train_test_split(x_test, y_test, random_state=None, test_size=0.5)
+
+# Define the model
+model = Sequential([
+    Dense(units=10, input_dim=x.shape[1], activation='relu'),
+    Dense(units=30),
+    Dense(units=1, activation='sigmoid')
+])
+
+# Compile the model
+model.compile(loss='mse', optimizer='adam', metrics=['mse'])
+
+# Train the model
+history = model.fit(x_train, y_train, epochs=epochs, batch_size=1, validation_data=(x_val, y_val), verbose=1)
+
+# Model evaluation
+yhat = model.predict(x_train)
+y_pred = model.predict(x_test)
+y_val_hat = model.predict(x_val)
+
+# Calculate RMSE
+def RMSE(y_train, yhat):
+    return np.sqrt(mean_squared_error(y_train, yhat))
+
+# Calculate R^2
+from sklearn.metrics import r2_score
+r2_yhat = r2_score(y_train, yhat)
+
+print("RMSE:", RMSE(y_train, yhat).round(3))
+print("R2:", r2_yhat.round(3))
+
+yhat = model.predict(x_train)
+y_pred = model.predict(x_test)
+y_val_hat = model.predict(x_val)
+
+# RMSE(root mean square error=sqrt((1/n) sum(y_test – y_pred )^2))
+# MSE (=mean square error=(1/n) sum(y_test –y_pred )^2)))
+
+from sklearn.metrics import mean_squared_error
+def RMSE(y_train, yhat):
+    return np.sqrt(mean_squared_error(y_train, yhat))
+ 
+print("x_test:", x_test)
+print("y_test:", y_test)
+print("y_pred: ", y_pred)
+print("RMSE:", RMSE(y_train, yhat).round(3))
+print("R2:", r2_yhat.round(3))
+
+# Plot the figures
+plt.figure(figsize=(6,8))
+
+# Plot y_train vs yhat curve
+plt.subplot(2, 2, 1)
+plt.scatter(y_train, yhat)
+plt.title('y_train vs yhat')
+plt.xlabel('y_train')
+plt.ylabel('yhat')
+
+# Plot loss-epoch curve
+plt.subplot(2, 2, 2)
+plt.plot(history.history['loss'])
+plt.title('train_loss vs epochs')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+
+# Plot y_test vs y_pred curve
+plt.subplot(2, 2, 3)
+plt.scatter(y_test, y_pred)
+plt.title('y_test vs y_pred')
+plt.xlabel('y_test')
+plt.ylabel('y_pred')
+
+# Plot y_val vs y_val_hat curve
+plt.subplot(2, 2, 4)
+plt.scatter(y_val, y_val_hat)
+plt.title('y_val vs y_val_hat')
+plt.xlabel('y_val')
+plt.ylabel('y_val_hat')
+
+plt.tight_layout()
+plt.show()
