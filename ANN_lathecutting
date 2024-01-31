@@ -3,7 +3,7 @@
 
 # 입력 60가지 상태, 입력층 3개 뉴런, 첫번째 은닉층에 10개의 뉴런, 두번째 은닉층에 30개의 뉴런, 출력층에 1개 뉴런 사용
 
-import numpy as np
+
 import matplotlib.pyplot as plt
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
