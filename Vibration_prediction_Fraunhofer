@@ -1,0 +1,65 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+from sklearn.metrics import classification_report
+
+# Load dataset A for training
+df_A = pd.read_csv('0D.csv')
+
+# Define the condition for assigning values to Column 4
+condition = df_A['Vibration_1'].abs() > 0.001
+
+# Assign values to Column 4 based on the condition
+df_A['Column 6'] = condition.astype(int)
+
+# Save the updated DataFrame back to a CSV file
+df_A.to_csv('0D_with_column_6.csv', index=False)
+
+y1 = df_A['Vibration_1']
+
+w_n = 0.35 
+C_min = y1.min()
+C_max = y1.max()
+D = C_max - C_min
+normalized_y1 = (y1 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
+
+# Load dataset B for evaluation
+df_B = pd.read_csv('0E.csv')
+
+# Define the condition for assigning values to Column 4
+condition = df_B['Vibration_1'].abs() > 0.001
+
+# Assign values to Column 4 based on the condition
+df_B['Column 6'] = condition.astype(int)
+
+# Save the updated DataFrame back to a CSV file
+df_B.to_csv('0E_with_column_6.csv', index=False)
+
+y3 = df_B['Vibration_1']
+
+w_n = 0.35 
+C_min = y3.min()
+C_max = y3.max()
+D = C_max - C_min
+normalized_y3 = (y3 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
+
+# Assuming the last column indicates the target variable (0 for normal, 1 for anomaly)
+X_train = df_A.iloc[:, :-1].values
+y_train = df_A.iloc[:, -1].values
+
+X_eval = df_B.iloc[:, :-1].values
+y_eval = df_B.iloc[:, -1].values
+
+# Initialize and train the Isolation Forest model
+model = IsolationForest(contamination='auto', random_state=42)
+model.fit(X_train)
+
+# Predict anomalies in evaluation dataset
+y_pred = model.predict(X_eval)
+
+# Convert predictions (-1 for anomaly, 1 for normal) to binary labels (0 for normal, 1 for anomaly)
+y_pred_binary = np.where(y_pred == -1, 1, 0)
+
+# Evaluate the model
+print("Classification Report:")
+print(classification_report(y_eval, y_pred_binary))
