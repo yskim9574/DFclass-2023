@@ -1,3 +1,6 @@
+#https://fordatis.fraunhofer.de/handle/fordatis/151.2?mode=full&locale=en
+#https://fordatis.fraunhofer.de/handle/fordatis/151.3
+#Vibration Measurements on a Rotating Shaft at Different Unbalance Strengths
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
