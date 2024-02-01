@@ -1,0 +1,59 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Read data from the first CSV file (replace '0D.csv' with the actual file path)
+df1 = pd.read_csv('0D.csv')
+
+# Assuming the CSV file has columns 'time' and 'Vibration_1' for vibration data A
+y1 = df1['Vibration_1']
+
+w_n = 0.35 
+C_min = y1.min()
+C_max = y1.max()
+D = C_max - C_min
+normalized_y1 = (y1 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
+
+# Plot the vibration data
+
+plt.figure(figsize=(5,5))
+
+# Generate sequential data (using the index of each data point)
+sequence_A = np.arange(len(df1))
+plt.ylim(0.206, 0.212)
+plt.xlim(0.4 * len(df1), 0.41 * len(df1))
+plt.plot(sequence_A, normalized_y1, label='Vibration A', color='blue')
+plt.title('Normalized Vibration Data in Sequence-Vibration Plane')
+plt.xlabel('Sequence')
+plt.ylabel('Normalized Vibration')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Read data from the first CSV file (replace '0D.csv' with the actual file path)
+df3 = pd.read_csv('0E.csv')
+
+# Assuming the CSV file has columns 'time' and 'Vibration_1' for vibration data A
+y3 = df3['Vibration_1']
+
+w_n = 0.35 
+C_min = y3.min()
+C_max = y3.max()
+D = C_max - C_min
+normalized_y3 = (y3 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
+
+# Plot the vibration data
+plt.figure(figsize=(5,5))
+
+# Generate sequential data (using the index of each data point)
+plt.ylim(0.206, 0.212)
+plt.xlim(0.4 * len(df1), 0.41* len(df1))
+sequence_A = np.arange(len(df3))
+
+plt.plot(sequence_A, normalized_y3, label='Vibration C', color='blue')
+plt.title('Normalized Vibration Data in Sequence-Vibration Plane')
+plt.xlabel('Sequence')
+plt.ylabel('Normalized Vibration')
+plt.legend()
+plt.grid(True)
+plt.show()
