@@ -1,0 +1,57 @@
+import numpy as np
+from sklearn.ensemble import IsolationForest
+from sklearn.metrics import classification_report
+import matplotlib.pyplot as plt
+
+# Generate sequential data for training
+np.random.seed(0)
+normal_data_train = np.random.normal(loc=0, scale=1, size=(50, 1))  # Normal data
+anomaly_data_train = np.random.uniform(low=-10, high=10, size=(15, 1))  # Anomaly data
+sequential_data_train = np.vstack((normal_data_train, anomaly_data_train))
+labels_train = np.hstack((np.zeros(50), np.ones(15)))  # Labels (0 for normal, 1 for anomaly)
+
+# Train the machine learning model
+model_train = IsolationForest(contamination='auto', random_state=42)
+model_train.fit(sequential_data_train)
+
+# Generate sequential data for evaluation
+normal_data_eval = np.random.normal(loc=0, scale=1, size=(30, 1))  # Normal data
+anomaly_data_eval = np.random.uniform(low=-10, high=10, size=(10, 1))  # Anomaly data
+sequential_data_eval = np.vstack((normal_data_eval, anomaly_data_eval))
+labels_eval = np.hstack((np.zeros(30), np.ones(10)))  # Labels (0 for normal, 1 for anomaly)
+
+# Evaluate the model
+predictions_eval = model_train.predict(sequential_data_eval)
+predictions_eval_binary = np.where(predictions_eval == -1, 1, 0)  # Convert to binary labels (0 for normal, 1 for anomaly)
+
+# Print classification report for evaluation
+print("Classification Report for Evaluation Data:")
+print(classification_report(labels_eval, predictions_eval_binary))
+
+# Sort the data points by index for connecting them with a line
+sorted_indices_train = np.argsort(np.arange(len(sequential_data_train)))
+sorted_indices_eval = np.argsort(np.arange(len(sequential_data_eval)))
+
+# Plot the training data
+plt.figure(figsize=(10, 6))
+plt.plot(sorted_indices_train, sequential_data_train[sorted_indices_train], c='g', linestyle='-', linewidth=1, alpha=0.5, label='Sequential Data (Training)')
+anomaly_indices_train = np.where(labels_train == 1)[0]
+plt.scatter(anomaly_indices_train, sequential_data_train[anomaly_indices_train], c='r', marker='^', label='Anomaly Data (Training)')
+plt.xlabel('Index')
+plt.ylabel('Magnitude')
+plt.title('Sequential Data with Anomalies in Training Data')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Plot the evaluation data
+plt.figure(figsize=(10, 6))
+plt.plot(sorted_indices_eval, sequential_data_eval[sorted_indices_eval], c='b', linestyle='-', linewidth=1, alpha=0.5, label='Sequential Data (Evaluation)')
+anomaly_indices_eval = np.where(predictions_eval == -1)[0]
+plt.scatter(anomaly_indices_eval, sequential_data_eval[anomaly_indices_eval], c='r', marker='^', label='Anomalies (Evaluation)')
+plt.xlabel('Index')
+plt.ylabel('Magnitude')
+plt.title('Sequential Data with Anomalies in Evaluation Data')
+plt.legend()
+plt.grid(True)
+plt.show()
