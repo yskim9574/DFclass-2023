@@ -2,20 +2,21 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.metrics import classification_report
+import matplotlib.pyplot as plt
 
 # Load dataset A for training
-df_A = pd.read_csv('0D.csv')
+df1 = pd.read_csv('test_normal.csv')
 
 # Define the condition for assigning values to Column 4
-condition = df_A['Vibration_1'].abs() > 0.001
+condition = df1['Vibration_1'].abs() > 0.0005
 
 # Assign values to Column 4 based on the condition
-df_A['Column 6'] = condition.astype(int)
+df1['Column 6'] = condition.astype(int)
 
 # Save the updated DataFrame back to a CSV file
-df_A.to_csv('0D_with_column_6.csv', index=False)
+df1.to_csv('test_normal_with_column_6.csv', index=False)
 
-y1 = df_A['Vibration_1']
+y1 = df1['Vibration_1']
 
 w_n = 0.35 
 C_min = y1.min()
@@ -23,19 +24,36 @@ C_max = y1.max()
 D = C_max - C_min
 normalized_y1 = (y1 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
 
+# Plot the vibration data
+
+plt.figure(figsize=(5,5))
+
+# Generate sequential data (using the index of each data point)
+sequence_A = np.arange(len(df1))
+#plt.ylim(0.206, 0.212)
+#plt.xlim(0.4 * len(df1), 0.41 * len(df1))
+plt.plot(sequence_A, normalized_y1, label='Vibration A', color='blue')
+plt.title('Normalized Vibration Data in Sequence-Vibration Plane')
+plt.xlabel('Sequence')
+plt.ylabel('Normalized Vibration')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
 # Load dataset B for evaluation
-df_B = pd.read_csv('0E.csv')
+df3 = pd.read_csv('test_evaluate.csv')
 
 # Define the condition for assigning values to Column 4
-condition = df_B['Vibration_1'].abs() > 0.001
+condition = df3['Vibration_1'].abs() > 0.0005
 
 # Assign values to Column 4 based on the condition
-df_B['Column 6'] = condition.astype(int)
+df3['Column 6'] = condition.astype(int)
 
 # Save the updated DataFrame back to a CSV file
-df_B.to_csv('0E_with_column_6.csv', index=False)
+df3.to_csv('test_evaluate_with_column_6.csv', index=False)
 
-y3 = df_B['Vibration_1']
+y3 = df3['Vibration_1']
 
 w_n = 0.35 
 C_min = y3.min()
@@ -43,12 +61,28 @@ C_max = y3.max()
 D = C_max - C_min
 normalized_y3 = (y3 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
 
-# Assuming the last column indicates the target variable (0 for normal, 1 for anomaly)
-X_train = df_A.iloc[:, :-1].values
-y_train = df_A.iloc[:, -1].values
+# Plot the vibration data
+plt.figure(figsize=(5,5))
 
-X_eval = df_B.iloc[:, :-1].values
-y_eval = df_B.iloc[:, -1].values
+# Generate sequential data (using the index of each data point)
+#plt.ylim(0.206, 0.212)
+#plt.xlim(0.4 * len(df1), 0.41* len(df1))
+sequence_A = np.arange(len(df3))
+
+plt.plot(sequence_A, normalized_y3, label='Vibration C', color='blue')
+plt.title('Normalized Vibration Data in Sequence-Vibration Plane')
+plt.xlabel('Sequence')
+plt.ylabel('Normalized Vibration')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Assuming the last column indicates the target variable (0 for normal, 1 for anomaly)
+X_train = df1.iloc[:, :-1].values
+y_train = df1.iloc[:, -1].values
+
+X_eval = df3.iloc[:, :-1].values
+y_eval = df3.iloc[:, -1].values
 
 # Initialize and train the Isolation Forest model
 model = IsolationForest(contamination='auto', random_state=42)
