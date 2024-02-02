@@ -6,9 +6,16 @@ import matplotlib.pyplot as plt
 
 # Load dataset A for training
 df1 = pd.read_csv('test_normal.csv')
+y1 = df1['Vibration_1']
+
+w_n = 0.35
+C_min = y1.min()
+C_max = y1.max()
+D = C_max - C_min
+normalized_y1 = (y1 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
 
 # Define the condition for assigning values to Column 4
-condition = df1['Vibration_1'].abs() > 0.0005
+condition = df1['Vibration_1'].abs() > 0.0015
 
 # Assign values to Column 4 based on the condition
 df1['Column 6'] = condition.astype(int)
@@ -16,23 +23,15 @@ df1['Column 6'] = condition.astype(int)
 # Save the updated DataFrame back to a CSV file
 df1.to_csv('test_normal_with_column_6.csv', index=False)
 
-y1 = df1['Vibration_1']
-
-w_n = 0.35 
-C_min = y1.min()
-C_max = y1.max()
-D = C_max - C_min
-normalized_y1 = (y1 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
-
 # Plot the vibration data
-
 plt.figure(figsize=(5,5))
 
 # Generate sequential data (using the index of each data point)
 sequence_A = np.arange(len(df1))
 #plt.ylim(0.206, 0.212)
 #plt.xlim(0.4 * len(df1), 0.41 * len(df1))
-plt.plot(sequence_A, normalized_y1, label='Vibration A', color='blue')
+#plt.plot(sequence_A, normalized_y1, label='Vibration A', color='blue')
+plt.plot(sequence_A, y1, label='Vibration A', color='blue')
 plt.title('Normalized Vibration Data in Sequence-Vibration Plane')
 plt.xlabel('Sequence')
 plt.ylabel('Normalized Vibration')
@@ -40,26 +39,24 @@ plt.legend()
 plt.grid(True)
 plt.show()
 
-
 # Load dataset B for evaluation
 df3 = pd.read_csv('test_evaluate.csv')
+y3 = df3['Vibration_1']
+
+w_n = 0.35
+C_min = y3.min()
+C_max = y3.max()
+D = C_max - C_min
+normalized_y3 = (y3 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
 
 # Define the condition for assigning values to Column 4
-condition = df3['Vibration_1'].abs() > 0.0005
+condition = df3['Vibration_1'].abs() > 0.006
 
 # Assign values to Column 4 based on the condition
 df3['Column 6'] = condition.astype(int)
 
 # Save the updated DataFrame back to a CSV file
 df3.to_csv('test_evaluate_with_column_6.csv', index=False)
-
-y3 = df3['Vibration_1']
-
-w_n = 0.35 
-C_min = y3.min()
-C_max = y3.max()
-D = C_max - C_min
-normalized_y3 = (y3 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
 
 # Plot the vibration data
 plt.figure(figsize=(5,5))
@@ -69,7 +66,8 @@ plt.figure(figsize=(5,5))
 #plt.xlim(0.4 * len(df1), 0.41* len(df1))
 sequence_A = np.arange(len(df3))
 
-plt.plot(sequence_A, normalized_y3, label='Vibration C', color='blue')
+#plt.plot(sequence_A, normalized_y3, label='Vibration C', color='red')
+plt.plot(sequence_A, y3, label='Vibration C', color='red')
 plt.title('Normalized Vibration Data in Sequence-Vibration Plane')
 plt.xlabel('Sequence')
 plt.ylabel('Normalized Vibration')
