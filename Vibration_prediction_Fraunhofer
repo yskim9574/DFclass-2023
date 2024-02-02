@@ -15,7 +15,15 @@ D = C_max - C_min
 normalized_y1 = (y1 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
 
 # Define the condition for assigning values to Column 4
-condition = df1['Vibration_1'].abs() > 0.0015
+condition = df1['Vibration_1'].abs() > 0.003
+
+# Find the maximum value in the 'Vibration_1' column
+max_value = df1['Vibration_1'].max()
+# Find the index where the maximum value occurs
+max_index = df1['Vibration_1'].idxmax()
+
+print("Maximum value in the 'Vibration_1' column:", max_value)
+print("Index where the maximum value occurs:", max_index)
 
 # Assign values to Column 4 based on the condition
 df1['Column 6'] = condition.astype(int)
@@ -29,7 +37,7 @@ plt.figure(figsize=(5,5))
 # Generate sequential data (using the index of each data point)
 sequence_A = np.arange(len(df1))
 #plt.ylim(0.206, 0.212)
-#plt.xlim(0.4 * len(df1), 0.41 * len(df1))
+#plt.xlim(0.0 * len(df1), 0.2 * len(df1))
 #plt.plot(sequence_A, normalized_y1, label='Vibration A', color='blue')
 plt.plot(sequence_A, y1, label='Vibration A', color='blue')
 plt.title('Normalized Vibration Data in Sequence-Vibration Plane')
@@ -50,7 +58,7 @@ D = C_max - C_min
 normalized_y3 = (y3 - (C_min - w_n * D)) / ((C_max + w_n * D) - (C_min - w_n * D))
 
 # Define the condition for assigning values to Column 4
-condition = df3['Vibration_1'].abs() > 0.006
+condition = df3['Vibration_1'].abs() > 0.002
 
 # Assign values to Column 4 based on the condition
 df3['Column 6'] = condition.astype(int)
@@ -63,7 +71,7 @@ plt.figure(figsize=(5,5))
 
 # Generate sequential data (using the index of each data point)
 #plt.ylim(0.206, 0.212)
-#plt.xlim(0.4 * len(df1), 0.41* len(df1))
+#plt.xlim(0. * len(df1), 0.2* len(df1))
 sequence_A = np.arange(len(df3))
 
 #plt.plot(sequence_A, normalized_y3, label='Vibration C', color='red')
