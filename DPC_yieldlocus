@@ -2,11 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Define the range of p values
-p_values = np.linspace(0.1, 20, 100)  # Adjust the range as needed
+p_values = np.linspace(0.1, 30, 1000)  # Adjust the range as needed
 
 # Define the parameters for the first curve
 beta_degrees_1 = 60
-d_1 = 0.6
+d_1 = 1.0
 
 # Convert beta from degrees to radians for the first curve
 beta_radians_1 = np.deg2rad(beta_degrees_1)
@@ -15,26 +15,48 @@ beta_radians_1 = np.deg2rad(beta_degrees_1)
 q_values_1 = d_1 + p_values * np.tan(beta_radians_1)
 
 # Plot the first curve
-plt.plot(p_values, q_values_1, label=r'$q = d + p \cdot \tan(\beta)$', color='blue')
+plt.plot(p_values, q_values_1,  color='blue')
 
 # Define the parameters for the second curve
 beta_degrees_2 = 60
-d_2 = 0.6
+d_2 = 1.0
 R = 0.4
 pa = 7
 
 # Convert beta from degrees to radians for the second curve
 beta_radians_2 = np.deg2rad(beta_degrees_2)
 
-# Calculate the corresponding q values for the second curve
-q_values_2 = (1 / R) * np.sqrt(R**2 * (d_2 + pa * np.tan(beta_radians_2))**2 - (p_values - pa)**2)
+# Filter values for p > pa
+p_values_filtered = p_values[p_values > pa]
 
-# Plot the second curve
-plt.plot(p_values, q_values_2, label=r'$q = \frac{1}{R} \sqrt{R^2 (d+pa \cdot \tan(\beta))^2 - (p-pa)^2}$', color='red')
+# Calculate the corresponding q values for the second curve only for p > pa
+q_values_2_filtered = (1 / R) * np.sqrt(R**2 * (d_2 + pa * np.tan(beta_radians_2))**2 - (p_values_filtered - pa)**2)
+
+# Plot the second curve for p > pa
+plt.plot(p_values_filtered, q_values_2_filtered, color='red')
+
+# Define the parameters for the third curve
+beta_degrees_3 = 60
+d_3 = 1.0
+R = 0.4
+pa = 10
+
+# Convert beta from degrees to radians for the third curve
+beta_radians_3 = np.deg2rad(beta_degrees_3)
+
+# Filter values for p > pa
+p_values_filtered = p_values[p_values > pa]
+
+# Calculate the corresponding q values for the second curve only for p > pa
+q_values_3_filtered = (1 / R) * np.sqrt(R**2 * (d_3 + pa * np.tan(beta_radians_3))**2 - (p_values_filtered - pa)**2)
+
+# Plot the third curve for p > pa
+plt.plot(p_values_filtered, q_values_3_filtered, linestyle=':', color='green')
+
 
 # Set axis limits
-plt.xlim(0, 20)
-plt.ylim(0, 20)
+plt.xlim(0, 30)
+plt.ylim(0, 30)
 
 # Label axes and add title
 plt.xlabel('p')
