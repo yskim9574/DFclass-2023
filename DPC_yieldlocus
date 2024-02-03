@@ -1,0 +1,49 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Define the range of p values
+p_values = np.linspace(0.1, 20, 100)  # Adjust the range as needed
+
+# Define the parameters for the first curve
+beta_degrees_1 = 60
+d_1 = 0.6
+
+# Convert beta from degrees to radians for the first curve
+beta_radians_1 = np.deg2rad(beta_degrees_1)
+
+# Calculate the corresponding q values for the first curve
+q_values_1 = d_1 + p_values * np.tan(beta_radians_1)
+
+# Plot the first curve
+plt.plot(p_values, q_values_1, label=r'$q = d + p \cdot \tan(\beta)$', color='blue')
+
+# Define the parameters for the second curve
+beta_degrees_2 = 60
+d_2 = 0.6
+R = 0.4
+pa = 7
+
+# Convert beta from degrees to radians for the second curve
+beta_radians_2 = np.deg2rad(beta_degrees_2)
+
+# Calculate the corresponding q values for the second curve
+q_values_2 = (1 / R) * np.sqrt(R**2 * (d_2 + pa * np.tan(beta_radians_2))**2 - (p_values - pa)**2)
+
+# Plot the second curve
+plt.plot(p_values, q_values_2, label=r'$q = \frac{1}{R} \sqrt{R^2 (d+pa \cdot \tan(\beta))^2 - (p-pa)^2}$', color='red')
+
+# Set axis limits
+plt.xlim(0, 20)
+plt.ylim(0, 20)
+
+# Label axes and add title
+plt.xlabel('p')
+plt.ylabel('q')
+plt.title('Drucker-Prager Cap Models')
+
+# Add legend and grid
+plt.legend()
+plt.grid(True)
+
+# Show plot
+plt.show()
