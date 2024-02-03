@@ -1,18 +1,24 @@
 import numpy as np
-from sklearn.ensemble import IsolationForest
+from sklearn.neighbors import LocalOutlierFactor
 from sklearn.metrics import classification_report
+from sklearn.ensemble import IsolationForest
 import matplotlib.pyplot as plt
 
 # Generate sequential data for training
 np.random.seed(0)
 normal_data_train = np.random.normal(loc=0, scale=1, size=(50, 1))  # Normal data
-anomaly_data_train = np.random.uniform(low=-10, high=10, size=(15, 1))  # Anomaly data
+anomaly_data_train = np.random.uniform(low=-5, high=5, size=(15, 1))  # Anomaly data
 sequential_data_train = np.vstack((normal_data_train, anomaly_data_train))
 labels_train = np.hstack((np.zeros(50), np.ones(15)))  # Labels (0 for normal, 1 for anomaly)
 
-# Train the machine learning model
-model_train = IsolationForest(contamination='auto', random_state=42)
+# Choose one model
+# Train the kNN model
+model_train = LocalOutlierFactor(n_neighbors=20, novelty=True)
 model_train.fit(sequential_data_train)
+
+# Train the machine learning model
+#model_train = IsolationForest(contamination='auto', random_state=42)
+#model_train.fit(sequential_data_train)
 
 # Generate sequential data for evaluation
 normal_data_eval = np.random.normal(loc=0, scale=1, size=(30, 1))  # Normal data
@@ -51,7 +57,7 @@ anomaly_indices_eval = np.where(predictions_eval == -1)[0]
 plt.scatter(anomaly_indices_eval, sequential_data_eval[anomaly_indices_eval], c='r', marker='^', label='Anomalies (Evaluation)')
 plt.xlabel('Index')
 plt.ylabel('Magnitude')
-plt.title('Sequential Data with Anomalies in Evaluation Data')
+plt.title('Sequential Data with Anomalies Detected by kNN in Evaluation Data')
 plt.legend()
 plt.grid(True)
 plt.show()
