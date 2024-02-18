@@ -161,10 +161,11 @@ plt.show()
 
 #A function that reduces the data dimension to calculate the reconstruction error of model output and input values. 
 flattened = []  # Initialize flattened as an empty list before using it in the function
-def flatten(X):
-  for i in range(X.shape[0]):
-    flattened[i] = X[i, X.shape[1]-1, :]
-  return flattened
+def	flatten(X):
+    flattened	=	np.empty((X.shape[0],	X.shape[2])) 
+    for	i	in	range(X.shape[0]):	
+        flattened[i]	=	X[i,	X.shape[1]-1,	:] 
+    return(flattened)
 
 #	Specify LSTM-Autoencoder threshold and visualize precision and recall curves based on threshold
 valid_x_predictions	=	lstm_ae.predict(X_valid)
