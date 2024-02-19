@@ -1,0 +1,206 @@
+import	pandas	as	pd	
+import	numpy	as	np
+from	sklearn.preprocessing	import	StandardScaler
+from	tensorflow.keras.models	import	Sequential
+from	tensorflow.keras.layers	import	LSTM,	RepeatVector,	TimeDistributed,	Dense
+from	tensorflow.keras.callbacks	import	EarlyStopping 
+import	matplotlib.pyplot	as	plt
+import	seaborn	as	sns
+from	sklearn.metrics	import	confusion_matrix,	ConfusionMatrixDisplay,	classification_report
+
+dir(pd)
+normal_dataset	=	pd.read_excel('laserhole_normal.xlsx') 
+normal_dataset.head()
+anomaly_dataset	=	pd.read_excel('laserhole_anomaly.xlsx') 
+anomaly_dataset.head()
+normal_dataset.tail()
+normal_dataset[15:20]
+
+plt.rc('font',	size=20)
+plt.rc('axes',	labelsize=20)	
+plt.rc('xtick',	labelsize=20)
+plt.rc('ytick',	labelsize=20)
+plt.rc('legend',	fontsize=20)
+plt.rc('figure',	titlesize=20)
+
+plt.figure(figsize=(20,	5))
+plt.xlabel('Index')
+plt.ylabel('Intensity')
+plt.plot(normal_dataset['Intensity'][10:31],	marker='o',	color='red')
+plt.show()
+
+plt.figure(figsize=(20,	5))
+plt.xlabel('Index')
+plt.ylabel('Current')
+plt.plot(normal_dataset['Current'][10:31],	marker='*',	color='blue')
+plt.show()
+
+plt.figure(figsize=(20,	5))
+plt.xlabel('Index')
+plt.plot(normal_dataset['Intensity'][10:31],	marker='o',	color='red',	label='Intensity')
+plt.plot(normal_dataset['Current'][10:31],	marker='*',	color='blue',	label='Current')
+plt.legend()
+plt.show()
+
+normal_dataset.info()
+anomaly_dataset.info()
+normal_dataset.describe()
+anomaly_dataset.describe()
+normal_dataset.corr()
+anomaly_dataset.corr()
+plt.figure(figsize=(5,5))
+sns.heatmap(data=normal_dataset.corr(),	annot=True,	fmt='.2f',	cmap='Blues') 
+plt.show()
+plt.figure(figsize=(5,5))
+sns.heatmap(data=anomaly_dataset.corr(),	annot=True,	fmt='.2f',	cmap='Reds') 
+plt.show()
+train_dataset	=	normal_dataset['Intensity'][:80480].values
+test_dataset	=	pd.concat([normal_dataset['Intensity'][80480:],	anomaly_dataset['Intensity']],	
+ignore_index=True).values
+print('No. learning data:',	len(train_dataset)) 
+print('No. evaluation test:',	len(test_dataset))
+type(train_dataset)
+type(test_dataset)
+train_dataset.shape
+test_dataset.shape
+
+scaler	=	StandardScaler()
+train_dataset	=	scaler.fit_transform(train_dataset.reshape(-1,	1)) 
+test_dataset	=	scaler.transform(test_dataset.reshape(-1,	1))
+
+train_dataset.shape
+test_dataset.shape
+
+plt.figure(figsize=(20,	5))
+plt.xlabel('Index')
+plt.ylabel('Intensity')
+plt.plot(train_dataset[10:31],	marker='o',	color='red')
+plt.show()
+time_step	=	40
+train_dataset	=	train_dataset.reshape(-1,	time_step,	1) 
+test_dataset	=	test_dataset.reshape(-1,	time_step,	1) 
+print('learning data	Shape:',	train_dataset.shape) 
+print('evaluation data	Shape:',	test_dataset.shape)
+
+plt.figure(figsize=(20,10))
+plt.subplot(3,	1,	1)
+plt.plot(train_dataset[0],	marker='o',	color='blue')
+plt.subplot(3,	1,	2)
+plt.plot(train_dataset[1],	marker='o',	color='blue')
+plt.subplot(3,	1,	3)
+plt.plot(train_dataset[2],	marker='o',	color='blue')
+plt.show()
+
+model	=	Sequential()
+model.add(LSTM(units=250,	activation='tanh',	input_shape=(time_step,	1)))
+model.add(RepeatVector(n=time_step))
+model.add(LSTM(units=250,	activation='tanh',	return_sequences=True))
+model.add(TimeDistributed(Dense(units=1)))
+model.summary()
+
+model.compile(loss='mae',	optimizer='adam') 
+history	=	model.fit(x=train_dataset,	y=train_dataset,	
+epochs=200,	validation_split=0.2,	callbacks=[EarlyStopping(patience=10)])
+
+history.history['loss']
+history.history['val_loss']
+
+plt.figure(figsize=(20,	10))
+plt.plot(history.history['loss'],	color='blue',	label='Train')
+plt.plot(history.history['val_loss'],	color='red',	label='Validation')
+plt.ylabel('Loss	(MAE)')
+plt.xlabel('Epoch')
+plt.legend()
+plt.show()
+
+train_yhat	=	model.predict(train_dataset) 
+train_yhat.shape
+plt.figure(figsize=(20,	10))
+plt.plot(train_dataset[0],	marker='o',	color='blue',	label='Target')
+plt.plot(train_yhat[0],	marker='*',	color='red',	label='Reconstructed')
+plt.legend()
+plt.show()
+
+train_mae	=	np.mean(np.abs(train_yhat	-	train_dataset),	axis=1) 
+train_mae
+print('Reconstruction error(MAE)	-	Min:',	train_mae.min()) 
+print('Reconstruction error(MAE)	-	Max:',	train_mae.max())
+best_mae	=	np.where(train_mae	==	train_mae.min())[0][0] 
+worst_mae	=	np.where(train_mae	==	train_mae.max())[0][0] 
+print('Reconstruction error(MAE)	-	Min index:',	best_mae)
+print('Reconstrucion error(MAE)	-	Max index:',	worst_mae)
+
+plt.figure(figsize=(20,	10))
+plt.plot(train_dataset[best_mae],	marker='o',	color='blue',	label='Target')
+plt.plot(train_yhat[best_mae],	marker='*',	color='red',	label='Reconstructed')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(20,	10))
+plt.plot(train_dataset[worst_mae],	marker='o',	color='blue',	label='Target')
+plt.plot(train_yhat[worst_mae],	marker='*',	color='red',	label='Reconstructed')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(20,	10))
+plt.hist(x=train_mae,	bins=100)
+plt.xlabel('Train	dataset	-	MAE')
+plt.ylabel('Number	of	samples')
+plt.show()
+
+threshold	=	np.mean(train_mae)	+	3	*	np.std(train_mae) 
+print('Threshold	:',	threshold)
+
+plt.figure(figsize=(20,	10))
+plt.text(x=0,	y=threshold,	s='Threshold',	fontsize=20,	color='red')
+plt.hlines(y=threshold,	xmin=0,	xmax=len(train_mae),	color='red',	linestyle='--')
+plt.xlabel('Train	dataset	(2,012	sequences)')
+plt.ylabel('Train	MAE')
+plt.scatter(x=np.arange(0,	2012),	y=train_mae,	color='black')
+plt.show()
+
+test_yhat	=	model.predict(test_dataset)
+test_mae	=	np.mean(np.abs(test_yhat	-	test_dataset),	axis=1)
+plt.figure(figsize=(20,	10))
+plt.hist(x=test_mae,	bins=100)
+plt.xlabel('Test	dataset	-	MAE')
+plt.ylabel('Number	of	samples')
+plt.show()
+plt.figure(figsize=(20,	10))
+plt.hist(x=train_mae,	bins=100,	color='blue',	alpha=0.5,	label='Train	Dataset	MAE')
+plt.hist(x=test_mae,	bins=100,	color='red',	alpha=0.5,	label='Test	Dataset	MAE')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(20,	10))
+plt.text(x=0,	y=max(test_mae),	s='Normal	data',	horizontalalignment='left',	color='blue')
+plt.text(x=len(test_mae),	y=max(test_mae),	s='Anomaly	data',	horizontalalignment='right',	color='blue')
+plt.vlines(x=294.5,	ymin=0,	ymax=max(test_mae),	color='blue',	linestyle='--')
+plt.text(x=0,	y=threshold,	s='Threshold',	fontsize=20,	color='red')
+plt.hlines(y=threshold,	xmin=0,	xmax=len(test_mae),	color='red',	linestyle='--')
+plt.xlabel('Test	dataset	(590	sequences)')
+plt.ylabel('Test	MAE')
+plt.scatter(x=np.arange(0,	590),	y=test_mae,	color='black',	marker='*')
+plt.show()
+
+result	=	pd.DataFrame(data=test_mae,	columns=['MAE'])
+result['Target']	=	-1
+result['Prediction']	=	-1
+result
+
+Normal	=	0 
+Anomaly	=	1
+result.loc[:295,	'Target']	=	Normal
+result.loc[295:,	'Target']	=	Anomaly
+result
+
+result.loc[result['MAE']	<=	threshold,	'Prediction']	=	Normal
+result.loc[result['MAE']	>	threshold,	'Prediction']	=	Anomaly
+result
+
+cm	=	confusion_matrix(result['Target'],	result['Prediction']) 
+print('Confusion	Matrix	\n',	cm)
+display	=	ConfusionMatrixDisplay(confusion_matrix	=	cm,	display_labels	=	['Normal',	'Anomaly']) 
+display.plot(cmap	=	plt.cm.Blues)
+plt.show()
+print(classification_report(result['Target'],	result['Prediction'],	target_names=['Normal',	'Anomaly']))
