@@ -1,0 +1,96 @@
+# monitoring the temperature of a machine in a factory to detect overheating or sudden drop
+
+import pandas as pd
+import numpy as np
+
+
+# Generate synthetic temperature data
+np.random.seed(42)  # For reproducibility
+time_series = pd.date_range('2023-01-01', periods=720, freq='H')  # 30 days of data
+temperatures = np.random.normal(loc=20, scale=2, size=len(time_series))  # Average temperature of 20°C
+
+# Introduce anomalies
+temperatures[100:105] += 10  # Overheating for a short period (consider as anomaly data)
+temperatures[300] -= 10  # Sudden drop in temperature (consider as noise daa)
+
+temperature_data = pd.DataFrame({'Timestamp': time_series, 'Temperature': temperatures})
+
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(10, 6))
+plt.plot(temperature_data['Timestamp'], temperature_data['Temperature'], label='Temperature')
+plt.scatter(temperature_data['Timestamp'][100:105], temperature_data['Temperature'][100:105], color='red', label='High Temperature Anomaly')
+plt.scatter(temperature_data['Timestamp'][300], temperature_data['Temperature'][300], color='green', label='Low Temperature Anomaly')
+plt.xlabel('Time')
+plt.ylabel('Temperature (°C)')
+plt.title('Temperature Time Series with Anomalies')
+plt.legend()
+plt.show()
+
+
+mean_temp = temperature_data['Temperature'].mean()
+std_temp = temperature_data['Temperature'].std()
+
+# Flag anomalies
+temperature_data['Anomaly'] = ((temperature_data['Temperature'] < (mean_temp - 3 * std_temp)) |
+                               (temperature_data['Temperature'] > (mean_temp + 3 * std_temp)))
+
+# Visualize anomalies
+plt.figure(figsize=(10, 6))
+plt.plot(temperature_data['Timestamp'], temperature_data['Temperature'], label='Temperature')
+plt.scatter(temperature_data[temperature_data['Anomaly']]['Timestamp'], temperature_data[temperature_data['Anomaly']]['Temperature'], color='red', label='Anomaly')
+plt.xlabel('Time')
+plt.ylabel('Temperature (°C)')
+plt.title('Detected Anomalies in Temperature Time Series')
+plt.legend()
+plt.show()
+
+import pywt
+
+def wavelet_denoising(data, wavelet, level):
+    # Decompose to get the wavelet coefficients
+    coeff = pywt.wavedec(data, wavelet, mode="per", level=level)
+    # Calculate a threshold value
+    sigma = (1/0.6745) * mad(coeff[-level])
+    uthresh = sigma * np.sqrt(2 * np.log(len(data)))
+    # Thresholding
+    coeff[1:] = (pywt.threshold(i, value=uthresh, mode='soft') for i in coeff[1:])
+    # Reconstruct the signal
+    return pywt.waverec(coeff, wavelet, mode="per")
+
+def mad(data, axis=None):
+    return np.median(np.absolute(data - np.median(data, axis)), axis)
+
+#For preprocessing (noise removal) of the collected frequency signals,
+#Filter-based wavelet transform technique (wavelet filter-based de-noising method) were used.
+
+wavelet = 'db4'  # Daubechies wavelet
+level = 2  # Level of decomposition
+temperature_data['Temperature_Denoised'] = wavelet_denoising(temperature_data['Temperature'], wavelet, level)
+
+# Visualize the original and denoised data
+plt.figure(figsize=(10, 6))
+plt.plot(temperature_data['Timestamp'], temperature_data['Temperature'], label='Original Temperature', alpha=0.5)
+plt.plot(temperature_data['Timestamp'], temperature_data['Temperature_Denoised'], label='Denoised Temperature', color='red')
+plt.xlabel('Time')
+plt.ylabel('Temperature (°C)')
+plt.title('Temperature Time Series: Original vs. Denoised')
+plt.legend()
+plt.show()
+
+mean_temp = temperature_data['Temperature_Denoised'].mean()
+std_temp = temperature_data['Temperature_Denoised'].std()
+
+# Flag anomalies
+temperature_data['Anomaly'] = ((temperature_data['Temperature_Denoised'] < (mean_temp - 3 * std_temp)) |
+                               (temperature_data['Temperature_Denoised'] > (mean_temp + 3 * std_temp)))
+
+# Visualize anomalies
+plt.figure(figsize=(10, 6))
+plt.plot(temperature_data['Timestamp'], temperature_data['Temperature_Denoised'], label='Temperature_Denoised')
+plt.scatter(temperature_data[temperature_data['Anomaly']]['Timestamp'], temperature_data[temperature_data['Anomaly']]['Temperature_Denoised'], color='red', label='Anomaly')
+plt.xlabel('Time')
+plt.ylabel('Temperature_Denoised (°C)')
+plt.title('Detected Anomalies in Temperature Time Series')
+plt.legend()
+plt.show()
