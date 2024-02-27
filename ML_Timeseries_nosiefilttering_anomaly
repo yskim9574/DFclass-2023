@@ -30,10 +30,12 @@ plt.show()
 
 mean_temp = temperature_data['Temperature'].mean()
 std_temp = temperature_data['Temperature'].std()
+upper_bound=(mean_temp + 3 * std_temp)
+lower_bound=(mean_temp - 3 * std_temp)
 
 # Flag anomalies
-temperature_data['Anomaly'] = ((temperature_data['Temperature'] < (mean_temp - 3 * std_temp)) |
-                               (temperature_data['Temperature'] > (mean_temp + 3 * std_temp)))
+temperature_data['Anomaly'] = ((temperature_data['Temperature'] < lower_bound) |
+                               (temperature_data['Temperature'] > upper_bound))
 
 # Visualize anomalies
 plt.figure(figsize=(10, 6))
@@ -44,6 +46,19 @@ plt.ylabel('Temperature (°C)')
 plt.title('Detected Anomalies in Temperature Time Series')
 plt.legend()
 plt.show()
+
+
+  # Plotting
+plt.figure(figsize=(10, 6))
+plt.plot(temperature_data['Timestamp'], temperature_data['Temperature'], label='Temperature')
+plt.scatter(temperature_data[temperature_data['Anomaly']]['Timestamp'], temperature_data[temperature_data['Anomaly']]['Temperature'], color='red', label='Anomaly')
+plt.axhline(y=lower_bound, color='r', linestyle='--', label='Mean - 3σ')
+plt.axhline(y=upper_bound, color='r', linestyle='--', label='Mean + 3σ')
+plt.xlabel('Time')
+plt.ylabel('Temperature (°C)')
+plt.title('Temperature Time Series with Anomaly Detection Thresholds')
+plt.legend()
+plt.show() 
 
 import pywt
 
@@ -80,10 +95,12 @@ plt.show()
 
 mean_temp = temperature_data['Temperature_Denoised'].mean()
 std_temp = temperature_data['Temperature_Denoised'].std()
+upper_bound=(mean_temp + 3 * std_temp)
+lower_bound=(mean_temp - 3 * std_temp)
 
 # Flag anomalies
-temperature_data['Anomaly'] = ((temperature_data['Temperature_Denoised'] < (mean_temp - 3 * std_temp)) |
-                               (temperature_data['Temperature_Denoised'] > (mean_temp + 3 * std_temp)))
+temperature_data['Anomaly'] = ((temperature_data['Temperature_Denoised'] < lower_bound) |
+                               (temperature_data['Temperature_Denoised'] > upper_bound))
 
 # Visualize anomalies
 plt.figure(figsize=(10, 6))
@@ -94,3 +111,15 @@ plt.ylabel('Temperature_Denoised (°C)')
 plt.title('Detected Anomalies in Temperature Time Series')
 plt.legend()
 plt.show()
+
+ # Plotting
+plt.figure(figsize=(10, 6))
+plt.plot(temperature_data['Timestamp'], temperature_data['Temperature_Denoised'], label='Temperature Denoised')
+plt.scatter(temperature_data[temperature_data['Anomaly']]['Timestamp'], temperature_data[temperature_data['Anomaly']]['Temperature_Denoised'], color='red', label='Anomaly')
+plt.axhline(y=lower_bound, color='r', linestyle='--', label='Mean - 3σ')
+plt.axhline(y=upper_bound, color='r', linestyle='--', label='Mean + 3σ')
+plt.xlabel('Time')
+plt.ylabel('Temperature (°C)')
+plt.title('Temperature Time Series with Anomaly Detection Thresholds')
+plt.legend()
+plt.show()            
