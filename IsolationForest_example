@@ -11,6 +11,8 @@ model = IsolationForest(random_state=42)
 
 # Fit the model
 model.fit(X)
+print('decision_function')
+print(model.decision_function(X). round(4))
 # Predict the anomaly scores for the dataset (converted to the range of 0 to 1)
 scores = 0.5 - model.decision_function(X)
 print('scores:')
@@ -26,10 +28,6 @@ results = np.column_stack((X, scores, anomaly))
 
 # Filter and show the anomalies with their converted scores
 anomalies_with_converted_scores = results[results[:, -1] == -1, :-1]
-print('score for [180, 152], [110,52], [45,100], [95, 160] is,')
-print(0.5-model.decision_function([[180, 152], [110,52],[45,100], [95, 160],]). round(4))
-print('decision_function')
-print(model.decision_function(X). round(4))
 
 # Plotting
 plt.figure(figsize=(7, 5))
@@ -50,3 +48,7 @@ plt.legend()
 
 # Show the plot
 plt.show()
+
+print('score for[47,120],[110,120],[135,80],[142,155] is,')
+print(0.5-model.decision_function([[47,120],[110,120],[135,80],[142,155]]). round(4))
+
