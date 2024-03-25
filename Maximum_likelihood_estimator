@@ -1,0 +1,27 @@
+import numpy as np
+from scipy.stats import norm
+from scipy.optimize import minimize
+
+# Generate synthetic data from a normal distribution
+np.random.seed(1004)
+true_mean = 4.5
+true_std = 2.0
+sample_size = 1000
+data = np.random.normal(true_mean, true_std, sample_size)
+
+# Define the negative log-likelihood function for a normal distribution
+def neg_log_likelihood(params, data):
+    mean, std = params
+    log_likelihood = -np.sum(norm.logpdf(data, mean, std))
+    return log_likelihood
+
+# Initial guess for mean and std
+initial_params = [1, 1]
+
+# Use MLE to estimate mean and std
+result = minimize(neg_log_likelihood, initial_params, args=(data,), method='L-BFGS-B')
+estimated_mean, estimated_std = result.x
+
+# Display the results
+print(f"True Mean: {true_mean}, True Standard Deviation: {true_std}")
+print(f"Estimated Mean: {estimated_mean.round(3)}, Estimated Standard Deviation: {estimated_std.round(3)}")
