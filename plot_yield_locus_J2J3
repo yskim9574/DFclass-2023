@@ -1,0 +1,46 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+def j2(sigma_1, sigma_2):
+    return (1/3)*((sigma_1)**2 - (sigma_1)*(sigma_2) + (sigma_2)**2)
+
+def j3(sigma_1, sigma_2):
+    return (1/27)*((2*(sigma_1)**3 + 2*(sigma_2)**3 - 3*(sigma_1 + sigma_2)
+    *(sigma_1)*(sigma_2)))
+
+def yield_func(sigma_1, sigma_2, alpha, beta, k):
+    J2 = j2(sigma_1, sigma_2)
+    J3 = j3(sigma_1, sigma_2)
+    return (J2)**3 + alpha*(J3)**(2) + beta*(J2)**(3/2)*(J3)**(1) - k**6
+
+# Define the range of principal stresses to plot
+sigma_range = np.linspace(-600, 600, 600)
+
+# Create a meshgrid of principal stresses
+sigma_1, sigma_2 = np.meshgrid(sigma_range, sigma_range)
+
+# Define values of alpha, beta, and k
+alpha = -2
+beta = 0
+ks = [114, 176, 235]
+line_styles = ['-', '--', '-.']
+legend_labels = [f'k={k} ({ls})' for k, ls in zip(ks, line_styles)]
+
+# Plot the grid
+plt.grid(True)
+
+# Plot the contour lines of the yield function for different values of k
+for k, line_style, legend_label in zip(ks, line_styles, legend_labels):
+    yield_func_values = yield_func(sigma_1, sigma_2, alpha, beta, k)
+    plt.contour(sigma_1, sigma_2, yield_func_values, levels=[0], colors='black', linestyles=line_style, label=legend_label)
+
+# Add labels and title to the plot
+plt.xlabel('Sigma 1')
+plt.ylabel('Sigma 2')
+plt.title('Yield Function')
+
+# Add legend in the upper part of the figure
+plt.legend(loc='upper center')
+
+# Display the plot
+plt.show()
