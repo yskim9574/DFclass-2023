@@ -1,0 +1,59 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Define get_fft_values function
+def get_fft_values(signal, T, N, f_s):
+    fft_values = np.fft.fft(signal)
+    fft_values = fft_values[range(N//2)]
+    f_values = np.linspace(0.0, f_s/2.0, N//2)
+    return f_values, np.abs(fft_values)
+
+t_n = 1
+N = 100000
+T = t_n / N
+f_s = 1/T
+
+xa = np.linspace(0, t_n, num=N)
+xb = np.linspace(0, t_n/4, num=N//4)
+frequencies = [4, 30, 60, 90]
+y1a, y1b = np.sin(2*np.pi*frequencies[0]*xa), np.sin(2*np.pi*frequencies[0]*xb)
+y2a, y2b = np.sin(2*np.pi*frequencies[1]*xa), np.sin(2*np.pi*frequencies[1]*xb)
+y3a, y3b = np.sin(2*np.pi*frequencies[2]*xa), np.sin(2*np.pi*frequencies[2]*xb)
+y4a, y4b = np.sin(2*np.pi*frequencies[3]*xa), np.sin(2*np.pi*frequencies[3]*xb)
+
+composite_signal1 = y1a + y2a + y3a + y4a
+composite_signal2 = np.concatenate([y1b, y2b, y3b, y4b])
+
+f_values1, fft_values1 = get_fft_values(composite_signal1, T, N, f_s)
+f_values2, fft_values2 = get_fft_values(composite_signal2, T, N, f_s)
+
+# Plot within 0~200Hz frequency range
+fig, axarr = plt.subplots(nrows=2, ncols=2, figsize=(12,8))
+fig.suptitle('Composite Signals and their Frequency Spectrums', fontsize=16)
+
+axarr[0,0].plot(xa, composite_signal1)
+axarr[0,0].set_title('Composite Signal 1')
+axarr[0,0].set_xlabel('Time (s)')
+axarr[0,0].set_ylabel('Amplitude')
+
+axarr[1,0].plot(xa, composite_signal2)
+axarr[1,0].set_title('Composite Signal 2')
+axarr[1,0].set_xlabel('Time (s)')
+axarr[1,0].set_ylabel('Amplitude')
+
+axarr[0,1].plot(f_values1, fft_values1)
+axarr[0,1].set_title('Frequency Spectrum of Composite Signal 1')
+axarr[0,1].set_xlabel('Frequency (Hz)')
+axarr[0,1].set_ylabel('Amplitude')
+
+axarr[1,1].plot(f_values2, fft_values2)
+axarr[1,1].set_title('Frequency Spectrum of Composite Signal 2')
+axarr[1,1].set_xlabel('Frequency (Hz)')
+axarr[1,1].set_ylabel('Amplitude')
+
+# Adjust x-axis limits to 0~200Hz
+axarr[0,1].set_xlim(0, 160)
+axarr[1,1].set_xlim(0, 160)
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
