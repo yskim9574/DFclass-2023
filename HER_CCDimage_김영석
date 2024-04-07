@@ -12,7 +12,7 @@ gray_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2GRAY)
 blurred_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
 
 # Apply Canny edge detection
-edges = cv2.Canny(blurred_image,150, 250)
+edges = cv2.Canny(blurred_image,300, 690)
 
 # Display the original image, grayscale image, and edges
 plt.figure(figsize=(12, 6))
