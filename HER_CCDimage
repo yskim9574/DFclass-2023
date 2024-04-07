@@ -1,0 +1,35 @@
+import cv2
+import matplotlib.pyplot as plt
+
+# Load the RGB image
+image_path = 'HER.JPG'
+rgb_image = cv2.imread(image_path)
+
+# Convert RGB image to grayscale
+gray_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2GRAY)
+
+# Apply Gaussian blur to reduce noise
+blurred_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
+
+# Apply Canny edge detection
+edges = cv2.Canny(blurred_image,150, 250)
+
+# Display the original image, grayscale image, and edges
+plt.figure(figsize=(12, 6))
+
+plt.subplot(1, 3, 1)
+plt.imshow(cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB))
+plt.title('Original RGB Image')
+plt.axis('off')
+
+plt.subplot(1, 3, 2)
+plt.imshow(gray_image, cmap='gray')
+plt.title('Grayscale Image')
+plt.axis('off')
+
+plt.subplot(1, 3, 3)
+plt.imshow(edges, cmap='gray')
+plt.title('Canny Edge Detection with Gaussian Filtering')
+plt.axis('off')
+
+plt.show()
