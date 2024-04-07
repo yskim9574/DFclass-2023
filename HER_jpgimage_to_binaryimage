@@ -1,0 +1,38 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Read the image as grayscale
+image_path = 'edges_results3.jpg'
+gray_image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+
+# Threshold the grayscale image to obtain a binary image
+_, binary_image = cv2.threshold(gray_image, 127, 255, cv2.THRESH_BINARY)
+
+# Invert the binary image (black pixels become white, and vice versa)
+binary_image_inverted = cv2.bitwise_not(binary_image)
+
+# Convert the binary image to a binary grid with pixel values of 0 or 1
+binary_grid = binary_image_inverted // 255  # Convert 255 to 1 and 0 to 0
+
+# Reshape the binary grid to add a channel dimension for compatibility with CNN input
+binary_grid = binary_grid.reshape((*binary_grid.shape, 1))
+
+# Normalize pixel values to be either 0 or 1
+binary_grid_normalized = binary_grid.astype(np.float32)
+
+# Plot the binary grid
+plt.figure(figsize=(8, 8))
+plt.imshow(binary_grid_normalized.squeeze(), cmap='gray', interpolation='nearest')
+plt.title('Binary Grid')
+plt.colorbar()
+
+# Add text on the plot to mark the values
+for i in range(binary_grid_normalized.shape[0]):
+    for j in range(binary_grid_normalized.shape[1]):
+        if binary_grid_normalized[i, j, 0] == 0:
+            plt.text(j, i, '1', ha='center', va='center', color='white')
+        else:
+            plt.text(j, i, '0', ha='center', va='center', color='black')
+
+plt.show()
