@@ -1,0 +1,80 @@
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers, models
+import numpy as np
+import matplotlib.pyplot as plt
+import cv2
+
+# Function to generate X images
+def generate_X(size):
+    img = np.zeros((size, size), dtype=np.uint8)
+    cv2.line(img, (0, 0), (size - 1, size - 1), 255, 2)
+    cv2.line(img, (0, size - 1), (size - 1, 0), 255, 2)
+    return img
+
+# Function to generate non-X images (random lines)
+def generate_non_X(size):
+    img = np.zeros((size, size), dtype=np.uint8)
+    cv2.line(img, (0, 0), (size - 1, size - 1), 255, 2)
+    return img
+
+# Parameters
+dataset_size = 10
+image_size = 28
+
+# Generate X images
+X_images = [generate_X(image_size) for _ in range(7)]
+# Generate non-X images
+non_X_images = [generate_non_X(image_size) for _ in range(3)]
+
+# Labels: X -> 1, non-X -> 0
+labels = np.concatenate([np.ones(len(X_images)), np.zeros(len(non_X_images))])
+images = np.array(X_images + non_X_images)
+
+# Shuffle the dataset
+indices = np.arange(len(images))
+np.random.shuffle(indices)
+labels = labels[indices]
+images = images[indices]
+
+# Define the model
+model = models.Sequential([
+    layers.Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 1)),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.Flatten(),
+    layers.Dense(64, activation='relu'),
+    layers.Dense(2, activation='softmax')  # Output layer with 2 neurons for binary classification
+])
+
+model.compile(optimizer='adam',
+              loss='sparse_categorical_crossentropy',
+              metrics=['accuracy'])
+
+# Assuming you want to predict on the first 4 images
+images_to_predict = images[:4]
+
+# Expand dimensions to match the model's input shape
+images_to_predict = np.expand_dims(images_to_predict, axis=-1)
+
+# Getting flattened layer values
+flattened_output = model.layers[-3].output
+flattened_model = tf.keras.Model(inputs=model.input, outputs=flattened_output)
+flattened_features = flattened_model.predict(images_to_predict)
+
+# Getting probabilistic values
+probabilities = model.predict(images_to_predict)
+
+# Display the first 4 images
+plt.figure(figsize=(10, 5))
+for i in range(4):
+    plt.subplot(2, 3, i + 1)
+    plt.imshow(images[i], cmap='gray')
+    plt.title("X" if labels[i] == 1 else "Non-X")
+    plt.axis('off')
+plt.show()
+
+print("Flattened Layer Values:", flattened_features)
+print("Probabilistic Values:", probabilities)
