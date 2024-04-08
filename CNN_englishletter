@@ -67,14 +67,19 @@ flattened_features = flattened_model.predict(images_to_predict)
 # Getting probabilistic values
 probabilities = model.predict(images_to_predict)
 
-# Display the first 4 images
+# Define a function to invert the pixel values
+def invert_image(image):
+    return np.where(image == 0, 1, 0)
+
+# Display the first 4 images with inverted colors
 plt.figure(figsize=(10, 5))
 for i in range(4):
     plt.subplot(2, 3, i + 1)
-    plt.imshow(images[i], cmap='gray')
+    inverted_image = invert_image(images[i])
+    plt.imshow(inverted_image, cmap='gray')  # Use inverted image
     plt.title("X" if labels[i] == 1 else "Non-X")
     plt.axis('off')
 plt.show()
-
 print("Flattened Layer Values:", flattened_features)
 print("Probabilistic Values:", probabilities)
+
