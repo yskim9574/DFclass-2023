@@ -7,7 +7,7 @@ from PIL import Image
 # Load your handwritten X and non-X images for training
 X_images = []
 non_X_images = []
-for i in range(1, 10):
+for i in range(1, 11):
     image_path = f"X_image_{i}.jpg"  # Update with your actual file names for X images
     img = Image.open(image_path).convert('L')  # Convert to grayscale
     img = img.resize((15, 15))  # Increase the image resolution
@@ -49,7 +49,7 @@ model.fit(images, labels, epochs=10, batch_size=4)
 
 # Load the new test images
 new_test_images = []
-for i in range(1, 4):
+for i in range(1, 5):  # Update the range to include all four new test images
     image_path = f"new_test_image_{i}.jpg"  # Update with your actual file names for new test images
     img = Image.open(image_path).convert('L')  # Convert to grayscale
     img = img.resize((15, 15))  # Increase the image resolution
@@ -61,7 +61,8 @@ new_test_images = np.expand_dims(new_test_images, axis=-1)
 predictions = model.predict(new_test_images)
 
 # Evaluate the model on the new test data
-loss, accuracy = model.evaluate(new_test_images, np.array([0, 1, 1]))  # Provide actual labels for the new test images
+true_labels = np.array([1, 1, 0, 0])  # Actual labels for the new test images (assuming first two are X, last two are non-X)
+loss, accuracy = model.evaluate(new_test_images, true_labels)
 print(f"Loss: {loss}, Accuracy: {accuracy}")
 
 # Getting probabilistic values
@@ -84,3 +85,4 @@ for i in range(len(new_test_images)):
     plt.title(f"Predicted: {predicted_class}")
     plt.axis('off')
 plt.show()
+
