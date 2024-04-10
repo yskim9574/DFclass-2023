@@ -37,7 +37,8 @@ model = models.Sequential([
     layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
     layers.Flatten(),
     layers.Dense(64, activation='relu'),
-    layers.Dense(2, activation='softmax')  # Output layer with 2 neurons for binary classification
+    layers.Dense(2, activation='sigmoid')  # Output layer with 2 neurons for binary classification
+#    layers.Dense(2, activation='softmax')  # Output layer with 2 neurons for binary classification
 ])
 
 model.compile(optimizer='adam',
