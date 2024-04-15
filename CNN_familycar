@@ -1,0 +1,55 @@
+import tensorflow as tf
+import tensorflow_hub as hub
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Load the model from TensorFlow Hub
+model = hub.load("https://tfhub.dev/tensorflow/ssd_mobilenet_v2/fpnlite_320x320/1")
+
+# Define a function for running inference
+def run_inference(image_path):
+    img = cv2.imread(image_path)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    resized_img = cv2.resize(img_rgb, (320, 320))
+    input_tensor = tf.convert_to_tensor(resized_img)
+    input_tensor = input_tensor[tf.newaxis, ...]
+    
+    # Run model
+    result = model(input_tensor)
+    result = {key:value.numpy() for key,value in result.items()}
+    return img_rgb, result
+
+# Function to draw bounding boxes
+def draw_boxes(image, results, threshold=0.3):  # Adjusted threshold
+    boxes = results['detection_boxes'][0]  # First element is the batch size
+    classes = results['detection_classes'][0]
+    scores = results['detection_scores'][0]
+    
+    # Iterate over detections and draw boxes
+    for i in range(boxes.shape[0]):
+        if scores[i] >= threshold:
+            # Scale box to image coordinates
+            y_min, x_min, y_max, x_max = boxes[i]
+            (left, right, top, bottom) = (x_min * image.shape[1], x_max * image.shape[1],
+                                         y_min * image.shape[0], y_max * image.shape[0])
+            if classes[i] == 1:  # Person class
+                color = (255, 0, 0)  # Red for person
+            elif classes[i] == 3:  # Car class
+                color = (0, 0, 255)  # Blue for car
+            else:
+                continue  # Skip other classes
+            cv2.rectangle(image, (int(left), int(top)), (int(right), int(bottom)), color, 2)
+    
+    return image
+
+# Usage of the functions
+image_path = 'family_car.jpg'  # Make sure this is the path to your image
+image_rgb, detections = run_inference(image_path)
+image_with_boxes = draw_boxes(image_rgb, detections)
+
+# Display the image
+plt.figure(figsize=(10, 10))
+plt.imshow(image_with_boxes)
+plt.axis('off')
+plt.show()
