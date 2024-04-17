@@ -37,13 +37,14 @@ model = models.Sequential([
     layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
     layers.Flatten(),
     layers.Dense(64, activation='relu'),
-    layers.Dense(2, activation='sigmoid')  # Output layer with 2 neurons for binary classification
-#    layers.Dense(2, activation='softmax')  # Output layer with 2 neurons for binary classification
+#    layers.Dense(2, activation='sigmoid')  # Output layer with 2 neurons for binary classification
+    layers.Dense(2, activation='softmax')  # Output layer with 2 neurons for binary classification
 ])
 
 model.compile(optimizer='adam',
               loss='sparse_categorical_crossentropy',
               metrics=['accuracy'])
+
 
 # Train the model with your data
 model.fit(images, labels, epochs=10, batch_size=4)
@@ -85,5 +86,35 @@ for i in range(len(new_test_images)):
     predicted_class = "X" if np.argmax(predictions[i]) == 1 else "Non-X"
     plt.title(f"Predicted: {predicted_class}")
     plt.axis('off')
+plt.show()
+
+# Train the model with validation split
+history = model.fit(images, labels, epochs=50, batch_size=4, validation_split=0.3)
+
+# Plot training & validation loss values
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model Loss')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.legend(['Train', 'Validation'], loc='upper left')
+plt.show()
+
+# Plot training & validation accuracy values
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+plt.title('Model Accuracy')
+plt.ylabel('Accuracy')
+plt.xlabel('Epoch')
+plt.legend(['Train', 'Validation'], loc='upper left')
+plt.show()
+
+# Plot training & validation loss values
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model Loss')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.legend(['Train', 'Validation'], loc='upper left')
 plt.show()
 
