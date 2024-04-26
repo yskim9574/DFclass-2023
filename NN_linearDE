@@ -1,0 +1,83 @@
+import torch
+import torch.nn as nn
+import numpy as np
+import matplotlib.pyplot as plt
+
+class NeuralNet(nn.Module):
+    def __init__(self, hidden_size, output_size=1, input_size=1):
+        super(NeuralNet, self).__init__()
+        self.l1 = nn.Linear(input_size, hidden_size)
+        self.relu1 = nn.LeakyReLU()
+        self.l2 = nn.Linear(hidden_size, hidden_size)
+        self.relu2 = nn.LeakyReLU()
+        self.l3 = nn.Linear(hidden_size, hidden_size)
+        self.relu3 = nn.LeakyReLU()
+        self.l4 = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        out = self.l1(x)
+        out = self.relu1(out)
+        out = self.l2(out)
+        out = self.relu2(out)
+        out = self.l3(out)
+        out = self.relu3(out)
+        out = self.l4(out)
+        return out
+
+# Criterion for the DE part of the loss
+criterion = nn.MSELoss()
+
+# Loss function for the initial condition
+def initial_condition_loss(y, target_value):
+    return nn.MSELoss()(y, target_value)
+
+# Time vector for input
+t_numpy = np.arange(-5, 5 + 0.01, 0.01, dtype=np.float32)
+t = torch.from_numpy(t_numpy).reshape(len(t_numpy), 1)
+t.requires_grad_(True)
+
+# Constants
+k = 1
+model = NeuralNet(hidden_size=50)
+learning_rate = 8e-3
+optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+num_epochs = int(1e4)
+
+losses = []
+y_t_minus_t = []
+
+for epoch in range(num_epochs):
+    epsilon = torch.normal(0, 0.1, size=(len(t), 1)).float()
+    t_train = t + epsilon
+    y_pred = model(t_train)
+    dy_dt = torch.autograd.grad(y_pred, t_train, grad_outputs=torch.ones_like(y_pred), create_graph=True)[0]
+    loss_DE = criterion((dy_dt - 4*t), torch.zeros_like(dy_dt))
+    loss_IC = initial_condition_loss(model(torch.tensor([[2.0]])), torch.tensor([[2.0]]))
+    loss = loss_DE + loss_IC
+    losses.append(loss.item())
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    if epoch == num_epochs - 1:
+        y_t = y_pred.detach().numpy().flatten() 
+
+# Plotting
+plt.figure(figsize=(12, 6))
+
+# Plot y(t) - t
+plt.subplot(1, 2, 1)
+plt.plot(t_numpy, y_t)
+plt.title('y(t) over time')
+plt.xlabel('Time t')
+plt.ylabel('y(t)')
+
+# Plot loss over epochs
+plt.subplot(1, 2, 2)
+plt.plot(losses)
+plt.title('Loss during training')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+
+plt.tight_layout()
+plt.show()
