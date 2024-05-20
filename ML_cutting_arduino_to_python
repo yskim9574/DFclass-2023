@@ -1,0 +1,98 @@
+# Read Data in Python
+
+import serial
+import time
+import pandas as pd
+
+# Initialize serial connection to Arduino
+arduino_port = "/dev/ttyUSB0"  # Replace with your Arduino's serial port
+baud_rate = 9600
+ser = serial.Serial(arduino_port, baud_rate)
+time.sleep(2)  # Wait for connection to establish
+
+# Initialize an empty list to store the data
+data = []
+
+# Function to read data from Arduino
+def read_data():
+    line = ser.readline().decode('utf-8').strip()
+    return float(line)
+
+# Read data for a specified duration or until you stop the script
+try:
+    while True:
+        force = read_data()
+        timestamp = time.time()
+        data.append([timestamp, force])
+        print(f"Time: {timestamp}, Force: {force}")
+        
+except KeyboardInterrupt:
+    print("Data collection stopped.")
+
+# Save data to a CSV file
+df = pd.DataFrame(data, columns=["Timestamp", "Force"])
+df.to_csv("cutting_force_data.csv", index=False)
+
+# Close the serial connection
+ser.close()
+
+#Preprocess the Data
+
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+
+# Load the data
+df = pd.read_csv("cutting_force_data.csv")
+
+# Example of normalization
+scaler = StandardScaler()
+df['Force'] = scaler.fit_transform(df[['Force']])
+
+# Additional preprocessing steps as required
+
+#Machine Learning Model
+
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import classification_report
+
+# Example data preparation (you'll need labels indicating failure or normal operation)
+df['Label'] = [0 if force < threshold else 1 for force in df['Force']]  # Dummy label generation
+X = df[['Force']]
+y = df['Label']
+
+# Split the data
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Train the model
+model = DecisionTreeClassifier()
+model.fit(X_train, y_train)
+
+# Predict and evaluate
+y_pred = model.predict(X_test)
+print(classification_report(y_test, y_pred))
+
+#Real-Time Prediction
+
+import joblib
+from sklearn.preprocessing import StandardScaler
+
+# Load the trained model and scaler
+model = joblib.load('trained_model.pkl')
+scaler = joblib.load('scaler.pkl')
+
+# Function to make predictions
+def predict_failure(force):
+    force_scaled = scaler.transform([[force]])
+    prediction = model.predict(force_scaled)
+    return prediction
+
+# Real-time prediction loop
+try:
+    while True:
+        force = read_data()
+        prediction = predict_failure(force)
+        print(f"Force: {force}, Prediction: {'Failure' if prediction[0] == 1 else 'Normal'}")
+        
+except KeyboardInterrupt:
+    print("Real-time prediction stopped.")
