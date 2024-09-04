@@ -1,0 +1,45 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+def process_force_signal(raw_signal):
+    # Calculate the mean of the signal
+    signal_mean = np.mean(raw_signal)
+    
+    # Subtract the mean from each data point to get the difference signal
+    difference_signal = raw_signal - signal_mean
+    
+    return difference_signal, signal_mean
+
+# Example usage
+# Assuming you have your encoded signal data in a numpy array called 'force_y'
+# If not, you'll need to load your data first
+
+# Generate sample data for demonstration
+time = np.linspace(0, 10, 1000)
+force_y = 100 + 20 * np.sin(2 * np.pi * 0.5 * time) + 5 * np.random.randn(1000)
+
+# Process the signal
+difference_signal, signal_mean = process_force_signal(force_y)
+
+# Plotting
+plt.figure(figsize=(12, 8))
+
+plt.subplot(2, 1, 1)
+plt.plot(time, force_y)
+plt.title('Original Force Signal (Y-direction)')
+plt.ylabel('Force (N)')
+plt.axhline(y=signal_mean, color='r', linestyle='--', label='Mean')
+plt.legend()
+
+plt.subplot(2, 1, 2)
+plt.plot(time, difference_signal)
+plt.title('Difference Signal (Shifted Zero)')
+plt.xlabel('Time (s)')
+plt.ylabel('Force Difference (N)')
+plt.axhline(y=0, color='r', linestyle='--', label='Zero')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+print(f"The mean of the original signal: {signal_mean:.2f} N").
