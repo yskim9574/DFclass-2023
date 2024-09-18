@@ -5,6 +5,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.neural_network import MLPRegressor
 import matplotlib.pyplot as plt
 
+
 # Dataset
 data = [
     [1, 0.25, 0.25, 0.15, 0.28540, 0.407097],
@@ -70,12 +71,12 @@ X_scaled = scaler.fit_transform(X)
 # Split data into training and test sets (80% training, 20% testing)
 X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
 
-# Build and train ANN model with SCG (Stochastic Conjugate Gradient) optimizer
-mlp_scg = MLPRegressor(hidden_layer_sizes=(10, 10), solver='lbfgs', max_iter=1000, random_state=42)
-mlp_scg.fit(X_train, y_train)
+# Build and train ANN model with LBFGS solver (Limited-memory Broyden–Fletcher–Goldfarb–Shanno optimizer)
+mlp_lbfgs = MLPRegressor(hidden_layer_sizes=(10, 10), solver='lbfgs', max_iter=1000, random_state=42)
+mlp_lbfgs.fit(X_train, y_train)
 
 # Predict using the updated model
-y_pred_scg = mlp_scg.predict(X_scaled)
+y_pred_lbfgs = mlp_lbfgs.predict(X_scaled)
 
 # Plot the Experimental and Predicted Cutting Force versus train number
 plt.figure(figsize=(10, 6))
@@ -83,8 +84,8 @@ plt.figure(figsize=(10, 6))
 # Plot Experimental Cutting Force
 plt.plot(np.arange(1, len(df)+1), df['Fc'], label='Experimental Fc', marker='o', linestyle='-', color='blue')
 
-# Plot Predicted Cutting Force (ANN with SCG)
-plt.plot(np.arange(1, len(df)+1), y_pred_scg, label='Predicted Fc (SCG)', marker='s', linestyle='--', color='red')
+# Plot Predicted Cutting Force (ANN with LBFGS)
+plt.plot(np.arange(1, len(df)+1), y_pred_lbfgs, label='Predicted Fc (LBFGS)', marker='s', linestyle='--', color='red')
 
 plt.title('Experimental and Predicted Cutting Force (Fc) vs Train Number')
 plt.xlabel('Data Point Number')
@@ -92,18 +93,19 @@ plt.ylabel('Cutting Force (Fc)')
 plt.legend()
 plt.grid(True)
 plt.show()
-# Plot the curve between experimental force (Fc) and ANN predicted force with SCG solver and 1:1 curve
+
+# Plot the curve between experimental force (Fc) and ANN predicted force with LBFGS solver and 1:1 curve
 plt.figure(figsize=(10, 6))
 
 # Plotting the data points (Experimental vs Predicted)
-plt.scatter(df['Fc'], y_pred_scg, color='blue', label='Predicted vs Experimental (SCG)', s=50)
+plt.scatter(df['Fc'], y_pred_lbfgs, color='blue', label='Predicted vs Experimental (LBFGS)', s=50)
 
 # Plotting the 1:1 line
-min_val = min(min(df['Fc']), min(y_pred_scg))
-max_val = max(max(df['Fc']), max(y_pred_scg))
+min_val = min(min(df['Fc']), min(y_pred_lbfgs))
+max_val = max(max(df['Fc']), max(y_pred_lbfgs))
 plt.plot([min_val, max_val], [min_val, max_val], color='red', linestyle='--', label='1:1 Line')
 
-plt.title('ANN Predicted Force vs Experimental Force (Fc) with SCG Solver and 1:1 Line')
+plt.title('ANN Predicted Force vs Experimental Force (Fc) with LBFGS Solver and 1:1 Line')
 plt.xlabel('Experimental Cutting Force (Fc)')
 plt.ylabel('Predicted Cutting Force (ANN)')
 plt.legend()
