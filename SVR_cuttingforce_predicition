@@ -1,0 +1,113 @@
+# Import necessary modules
+from sklearn.svm import SVR
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+import matplotlib.pyplot as plt
+
+# Dataset
+data = [
+    [1, 0.25, 0.25, 0.15, 0.28540, 0.407097],
+    [2, 0.25, 0.25, 0.3, 0.40050, 0.508387],
+    [3, 0.25, 0.25, 0.6, 0.63513, 0.694839],
+    [4, 0.25, 0.25, 0.9, 0.89351, 0.885806],
+    [5, 0.25, 0.33333, 0.15, 0.24702, 0.338065],
+    [6, 0.25, 0.33333, 0.3, 0.35567, 0.423871],
+    [7, 0.25, 0.33333, 0.6, 0.59621, 0.590968],
+    [8, 0.25, 0.33333, 0.9, 0.83027, 0.712258],
+    [9, 0.25, 0.5, 0.15, 0.19351, 0.237419],
+    [10, 0.25, 0.5, 0.3, 0.323784, 0.328387],
+    [11, 0.25, 0.5, 0.6, 0.53027, 0.425806],
+    [12, 0.25, 0.5, 0.9, 0.736757, 0.510323],
+    [13, 0.25, 0.66666, 0.15, 0.187568, 0.216129],
+    [14, 0.25, 0.66666, 0.3, 0.315135, 0.287742],
+    [15, 0.25, 0.66666, 0.6, 0.5, 0.371613],
+    [16, 0.25, 0.66666, 0.9, 0.702703, 0.427097],
+    [17, 0.25, 0.83333, 0.15, 0.191351, 0.209032],
+    [18, 0.25, 0.83333, 0.3, 0.307568, 0.263226],
+    [19, 0.25, 0.83333, 0.6, 0.500541, 0.330968],
+    [20, 0.25, 0.83333, 0.9, 0.671351, 0.38],
+    [21, 0.5, 0.25, 0.15, 0.223784, 0.270968],
+    [22, 0.5, 0.25, 0.3, 0.351892, 0.408387],
+    [23, 0.5, 0.25, 0.6, 0.605946, 0.607742],
+    [24, 0.5, 0.25, 0.9, 0.856757, 0.774194],
+    [25, 0.5, 0.33333, 0.15, 0.224865, 0.283226],
+    [26, 0.5, 0.33333, 0.3, 0.335135, 0.37871],
+    [27, 0.5, 0.33333, 0.6, 0.578378, 0.563871],
+    [28, 0.5, 0.33333, 0.9, 0.811351, 0.669032],
+    [29, 0.5, 0.5, 0.15, 0.182162, 0.209677],
+    [30, 0.5, 0.5, 0.3, 0.317297, 0.346452],
+    [31, 0.5, 0.5, 0.6, 0.544324, 0.49871],
+    [32, 0.5, 0.5, 0.9, 0.762162, 0.581935],
+    [33, 0.5, 0.66666, 0.15, 0.191351, 0.234194],
+    [34, 0.5, 0.66666, 0.3, 0.304324, 0.325806],
+    [35, 0.5, 0.66666, 0.6, 0.504324, 0.433548],
+    [36, 0.5, 0.66666, 0.9, 0.718378, 0.51871],
+    [37, 0.5, 0.83333, 0.15, 0.195135, 0.247742],
+    [38, 0.5, 0.83333, 0.3, 0.303784, 0.325161],
+    [39, 0.5, 0.83333, 0.6, 0.521081, 0.421935],
+    [40, 0.5, 0.83333, 0.9, 0.684324, 0.490323],
+    [41, 0.75, 0.25, 0.15, 0.204324, 0.247097],
+    [42, 0.75, 0.25, 0.3, 0.346486, 0.368387],
+    [43, 0.75, 0.25, 0.6, 0.601622, 0.581935],
+    [44, 0.75, 0.25, 0.9, 0.847027, 0.727097],
+    [45, 0.75, 0.33333, 0.15, 0.19027, 0.23258],
+    [46, 0.75, 0.33333, 0.3, 0.341081, 0.36],
+    [47, 0.75, 0.33333, 0.6, 0.570811, 0.518065],
+    [48, 0.75, 0.33333, 0.9, 0.764865, 0.576129]
+]
+
+df = pd.DataFrame(data, columns=['No', 'Ct', 'V', 'f', 'Fc', 'Ft'])
+
+# Feature selection (Ct, V, f) and target (Fc)
+X = df[['Ct', 'V', 'f']]
+y = df['Fc']
+
+# Normalize data
+scaler = MinMaxScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Split data into training and test sets (80% training, 20% testing)
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+# Build and train Support Vector Regression (SVR) model
+svr_model = SVR(kernel='rbf', C=100, gamma=0.1, epsilon=0.1)
+svr_model.fit(X_train, y_train)
+
+# Predict using the trained SVR model
+y_pred_svr = svr_model.predict(X_scaled)
+
+# Plot the Experimental and Predicted Cutting Force versus train number
+plt.figure(figsize=(10, 6))
+
+# Plot Experimental Cutting Force
+plt.plot(np.arange(1, len(df)+1), df['Fc'], label='Experimental Fc', marker='o', linestyle='-', color='blue')
+
+# Plot Predicted Cutting Force (SVR)
+plt.plot(np.arange(1, len(df)+1), y_pred_svr, label='Predicted Fc (SVR)', marker='s', linestyle='--', color='red')
+
+plt.title('Experimental and Predicted Cutting Force (Fc) vs Train Number using SVR')
+plt.xlabel('Data Point Number')
+plt.ylabel('Cutting Force (Fc)')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Plot the curve between experimental force (Fc) and SVR predicted force with 1:1 curve
+plt.figure(figsize=(10, 6))
+
+# Plotting the data points (Experimental vs Predicted)
+plt.scatter(df['Fc'], y_pred_svr, color='blue', label='Predicted vs Experimental (SVR)', s=50)
+
+# Plotting the 1:1 line
+min_val = min(min(df['Fc']), min(y_pred_svr))
+max_val = max(max(df['Fc']), max(y_pred_svr))
+plt.plot([min_val, max_val], [min_val, max_val], color='red', linestyle='--', label='1:1 Line')
+
+plt.title('ANN Predicted Force vs Experimental Force (Fc) with SCG Solver and 1:1 Line')
+plt.xlabel('Experimental Cutting Force (Fc)')
+plt.ylabel('Predicted Cutting Force (ANN)')
+plt.legend()
+plt.grid(True)
+plt.show()
