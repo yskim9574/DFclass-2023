@@ -1,0 +1,74 @@
+#Data from 'remanufacturing modeling and analysis, by M.A Ligin, page 180
+#production planning for product remanufacturing.
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+import matplotlib.pyplot as plt
+
+# Create the dataset from the image
+data = {
+    'Week': range(1, 25),
+    'Forecasted_Demand': [175, 150, 225, 200, 325, 165, 300, 310, 225, 300, 180, 255, 295, 275, 150, 180, 200, 325, 190, 170, 200, 220, 185, 145],
+    'Actual_Demand': [192, 137, 243, 213, 301, 174, 287, 323, 243, 279, 192, 272, 317, 255, 134, 197, 213, 309, 203, 157, 221, 199, 173, 168]
+}
+
+df = pd.DataFrame(data)
+
+# Prepare the data for training
+X = df[['Forecasted_Demand']]
+y = df['Actual_Demand']
+
+# Create and train the model
+model = LinearRegression()
+model.fit(X, y)
+
+# Print model coefficients
+print("Model Coefficients:")
+print(f"Intercept: {model.intercept_:.2f}")
+print(f"Slope: {model.coef_[0]:.2f}")
+
+# Calculate R-squared score
+r2 = r2_score(y, model.predict(X))
+print(f"R-squared Score: {r2:.4f}")
+
+# Calculate RMSE
+rmse = np.sqrt(mean_squared_error(y, model.predict(X)))
+print(f"Root Mean Squared Error: {rmse:.2f}")
+
+# New forecasted demand values
+new_forecasted_demand = [235, 200, 285, 265, 225, 300, 195, 225]
+
+# Make predictions
+predictions = model.predict(np.array(new_forecasted_demand).reshape(-1, 1))
+
+# Extend the dataframe to 32 weeks
+extended_df = df.copy()
+new_weeks = pd.DataFrame({
+    'Week': range(25, 33),
+    'Forecasted_Demand': new_forecasted_demand,
+    'Actual_Demand': predictions
+})
+extended_df = pd.concat([extended_df, new_weeks], ignore_index=True)
+
+# Plot forecasted demand and actual demand versus week
+plt.figure(figsize=(15, 7))
+plt.plot(extended_df['Week'], extended_df['Forecasted_Demand'], label='Forecasted Demand', marker='o')
+plt.plot(extended_df['Week'][:24], extended_df['Actual_Demand'][:24], label='Actual Demand', marker='s')
+plt.plot(extended_df['Week'][24:], extended_df['Actual_Demand'][24:], label='Predicted Actual Demand', marker='s', linestyle='--')
+
+plt.xlabel('Week')
+plt.ylabel('Demand')
+plt.title('Forecasted and Actual Demand over 32 Weeks')
+plt.legend()
+plt.grid(True)
+plt.xticks(range(0, 33, 2))  # Set x-axis ticks to every 2 weeks
+plt.axvline(x=24.5, color='r', linestyle='--', label='Prediction Start')
+plt.text(24.7, plt.ylim()[1], 'Prediction Start', rotation=90, verticalalignment='top')
+
+plt.show()
+
+# Print predictions
+print("\nPredictions for new forecasted demand:")
+for week, fd, ad in zip(range(25, 33), new_forecasted_demand, predictions):
+    print(f"Week: {week}, Forecasted Demand: {fd}, Predicted Actual Demand: {ad:.2f}")
