@@ -1,0 +1,56 @@
+#This program is for Randomized numerical linear algebra (RandNLA)
+#C=A*B, tilde C = tilde A * tilde B, C_approx = S * tilde C  S^T
+$tilde matrix is subset matrix
+#S is scaling matrix and diagonal matrix
+import numpy as np
+
+
+# Set random seed for reproducibility
+np.random.seed(42)
+
+# Generate a random 1000x1000 matrix
+A_large = np.random.rand(1000, 1000)
+B_large = np.random.rand(1000, 1000)
+
+# Compute exact matrix multiplication
+C_exact_large = A_large @ B_large
+
+# Randomly sample 100 rows and 100 columns (10% sampling)
+sample_indices = np.random.choice(1000, 100, replace=False)  # Select 100 random indices
+A_sampled_large = A_large[sample_indices, :]  # Select sampled rows from A
+B_sampled_large = B_large[:, sample_indices]  # Select sampled columns from B
+
+# Compute raw approximation (tilde C)
+C_tilde_large = A_sampled_large @ B_sampled_large
+
+# Compute the scaling factor and scaling matrix
+scaling_factor_large = 1 / np.sqrt(0.1 * 0.1)  # Since p_i = 0.1 (10% sampling)
+# Alternative scaling factor
+scaling_factor_large = 1 / np.sqrt(0.1)  # New scaling (more balanced)
+# Diagonal matrix with scaling factor in diagonal component
+S_large = np.diag([scaling_factor_large] * 100)  # 100x100 scaling matrix
+
+# Compute final scaled approximation
+C_approx_large = S_large @ C_tilde_large @ S_large
+
+# Extract first 5x5 elements and format to 2 decimal places
+C_exact_5x5 = np.round(C_exact_large[:5, :5], 2)
+C_tilde_5x5 = np.round(C_tilde_large[:5, :5], 2)
+C_approx_5x5 = np.round(C_approx_large[:5, :5], 2)
+
+# Print first 5x5 matrices for verification
+print("\nFirst 5x5 of C_exact_large:")
+print(C_exact_5x5)
+
+print("\nFirst 5x5 of C_tilde_large:")
+print(C_tilde_5x5)
+
+print("\nFirst 5x5 of C_approx_large:")
+print(C_approx_5x5)
+
+# Compute relative error between approximations and exact multiplication
+error_tilde = np.linalg.norm(C_exact_large[:100, :100] - C_tilde_large) / np.linalg.norm(C_exact_large[:100, :100])
+error_approx = np.linalg.norm(C_exact_large[:100, :100] - C_approx_large) / np.linalg.norm(C_exact_large[:100, :100])
+
+print("\nRelative Error (Tilde C vs Exact C):", error_tilde)
+print("Relative Error (Scaled Approx C vs Exact C):", error_approx)
