@@ -1,0 +1,152 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from skimage.restoration import unwrap_phase
+from scipy.ndimage import gaussian_filter
+
+def load_image(path):
+    """
+    Load image and ensure it's in the correct format (2D grayscale).
+    """
+    img = plt.imread(path)
+    # If image is RGB/RGBA, convert to grayscale
+    if len(img.shape) > 2:
+        img = np.mean(img, axis=2)
+    return img
+
+def calculate_phase(I1, I2, I3, I4):
+    """
+    Calculate phase from four phase-shifted patterns using arctangent algorithm.
+    """
+    numerator = I4 - I2
+    denominator = I1 - I3
+    wrapped_phase = np.arctan2(numerator, denominator)
+    return wrapped_phase
+
+def reconstruct_3d(I1, I2, I3, I4, wavelength=1.0, angle=45):
+    """
+    Reconstruct 3D shape from four phase-shifted patterns.
+    """
+    # 1. Calculate wrapped phase
+    wrapped_phase = calculate_phase(I1, I2, I3, I4)
+    
+    # 2. Unwrap phase
+    unwrapped_phase = unwrap_phase(wrapped_phase)
+    
+    # 3. Convert phase to height
+    angle_rad = np.deg2rad(angle)
+    height_map = (wavelength * unwrapped_phase) / (4 * np.pi * np.sin(angle_rad))
+    
+    # 4. Apply light smoothing to reduce noise
+    height_map = gaussian_filter(height_map, sigma=1)
+    
+    return height_map, wrapped_phase, unwrapped_phase
+
+def plot_3d_surface(height_map, subsample=4):
+    """
+    Create 3D surface plot of the reconstructed shape.
+    """
+    # Ensure height_map is 2D
+    if len(height_map.shape) > 2:
+        height_map = np.mean(height_map, axis=2)
+    
+    # Create coordinate grids
+    rows, cols = height_map.shape
+    x = np.arange(0, cols, subsample)
+    y = np.arange(0, rows, subsample)
+    X, Y = np.meshgrid(x, y)
+    
+    # Subsample the height map
+    Z = height_map[::subsample, ::subsample]
+    
+    # Create 3D plot
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Plot surface
+    surf = ax.plot_surface(X, Y, Z, cmap='viridis', linewidth=0)
+    
+    # Add colorbar
+    fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5)
+    
+    # Set labels
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Height')
+    ax.set_title('Reconstructed 3D Surface')
+    
+    return fig, ax
+
+def main():
+    try:
+        # Load the four phase-shifted patterns
+        I1 = load_image('phase_0.png')
+        I2 = load_image('phase_90.png')
+        I3 = load_image('phase_180.png')
+        I4 = load_image('phase_270.png')
+        
+        # Load true height map for comparison
+        true_height = load_image('true_height.png')
+        
+        # Print shapes for debugging
+        print("Image shapes:")
+        print(f"I1: {I1.shape}")
+        print(f"I2: {I2.shape}")
+        print(f"I3: {I3.shape}")
+        print(f"I4: {I4.shape}")
+        print(f"True height: {true_height.shape}")
+        
+        # Reconstruct 3D shape
+        height_map, wrapped_phase, unwrapped_phase = reconstruct_3d(I1, I2, I3, I4)
+        
+        # Visualization
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        
+        # Original patterns
+        axes[0,0].imshow(I1, cmap='gray')
+        axes[0,0].set_title('0° Phase Pattern')
+        axes[0,0].axis('off')
+        
+        axes[0,1].imshow(wrapped_phase, cmap='jet')
+        axes[0,1].set_title('Wrapped Phase')
+        axes[0,1].axis('off')
+        
+        axes[0,2].imshow(unwrapped_phase, cmap='jet')
+        axes[0,2].set_title('Unwrapped Phase')
+        axes[0,2].axis('off')
+        
+        # Reconstructed height
+        im1 = axes[1,0].imshow(height_map, cmap='viridis')
+        axes[1,0].set_title('Reconstructed Height')
+        axes[1,0].axis('off')
+        plt.colorbar(im1, ax=axes[1,0])
+        
+        # True height for comparison
+        im2 = axes[1,1].imshow(true_height, cmap='viridis')
+        axes[1,1].set_title('True Height')
+        axes[1,1].axis('off')
+        plt.colorbar(im2, ax=axes[1,1])
+        
+        # Height difference (error)
+        error = height_map - true_height
+        im3 = axes[1,2].imshow(error, cmap='RdBu')
+        axes[1,2].set_title('Height Error')
+        axes[1,2].axis('off')
+        plt.colorbar(im3, ax=axes[1,2])
+        
+        plt.tight_layout()
+        plt.show()
+        
+        # Create 3D surface plot
+        fig, ax = plot_3d_surface(height_map)
+        plt.show()
+        
+        # Print error statistics
+        rms_error = np.sqrt(np.mean(error**2))
+        print(f'RMS Error: {rms_error:.6f}')
+        
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    main()
