@@ -1,0 +1,131 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from skimage.restoration import unwrap_phase
+
+def load_and_preprocess_image(path, target_shape=None):
+    """
+    Loads an image in grayscale, converts to float32,
+    and optionally resizes to a target shape.
+    """
+    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise IOError(f"Cannot load image from {path}")
+    img = img.astype(np.float32) / 255.0
+
+    # If a target shape is provided, resize
+    if target_shape is not None:
+        # target_shape is (height, width)
+        img = cv2.resize(img, (target_shape[1], target_shape[0]))
+    return img
+
+
+def create_moire_pattern(ref_img, obj_img, alpha=0.5, beta=0.5):
+    """
+    Creates a simple moiré image by superimposing the reference and object images.
+    """
+    # Ensure both images have the same shape
+    if ref_img.shape != obj_img.shape:
+        raise ValueError("Reference and object images must have the same shape.")
+
+    moire = alpha * ref_img + beta * obj_img
+    return moire
+
+def fourier_transform_moire(moire_img):
+    """
+    Performs a 2D FFT on the moiré image and returns the shifted frequency spectrum.
+    """
+    # 2D FFT
+    f = np.fft.fft2(moire_img)
+    # Shift the zero frequency to the center
+    fshift = np.fft.fftshift(f)
+    return fshift
+
+
+def bandpass_filter(fshift, radius=50):
+    """
+    Applies a simple bandpass filter around the center of the spectrum.
+    `radius` should be tuned to isolate the fundamental fringe frequency.
+    """
+    rows, cols = fshift.shape
+    crow, ccol = rows // 2, cols // 2
+
+    # Create a mask using the known shape (rows, cols)
+    mask = np.zeros((rows, cols), dtype=np.uint8)
+    
+    # Draw a filled circle with a single value (255) for white
+    cv2.circle(mask, (ccol, crow), radius, 255, thickness=-1)
+    
+    # Convert mask to float32 so that it can be multiplied with fshift
+    mask_complex = mask.astype(np.float32)
+    
+    # Apply the mask to the Fourier spectrum
+    filtered = fshift * mask_complex
+    return filtered
+
+
+
+
+def inverse_fft_and_get_phase(filtered_spectrum):
+    """
+    Perform the inverse FFT on the filtered spectrum and extract the phase map.
+    """
+    # Inverse shift
+    f_ishift = np.fft.ifftshift(filtered_spectrum)
+    # Inverse FFT to get complex image
+    img_back = np.fft.ifft2(f_ishift)
+    # Extract the complex result
+    # The amplitude is abs(img_back), the phase is np.angle(img_back)
+    phase_map = np.angle(img_back)
+    return phase_map
+
+def main():
+    # 1. Load reference image
+    ref_img = load_and_preprocess_image("Moire1.jpg")
+    
+    # 2. Load object image and resize it to match ref_img
+    obj_img = load_and_preprocess_image("Moire2.jpg", target_shape=ref_img.shape)
+    
+    # Now both images have the same shape, so no ValueError
+    moire_img = create_moire_pattern(ref_img, obj_img, alpha=0.5, beta=0.5)
+    # ... continue with the rest of the code
+    
+    # 3. Fourier transform the moiré pattern
+    fshift = fourier_transform_moire(moire_img)
+    
+    # 4. Bandpass filter (to isolate the fundamental fringe frequency)
+    filtered = bandpass_filter(fshift, radius=50)
+    
+    # 5. Inverse FFT and extract phase
+    phase_map_wrapped = inverse_fft_and_get_phase(filtered)
+    
+    # 6. Phase unwrapping
+    phase_map_unwrapped = unwrap_phase(phase_map_wrapped)
+    
+    # (Optional) Convert phase to height using your system's calibration
+    # For example: height = phase_map_unwrapped * (some_constant_factor)
+    # Here, we'll just show the unwrapped phase as is.
+    
+    # 7. Visualization
+    fig, axes = plt.subplots(1, 3, figsize=(15,5))
+    axes[0].imshow(moire_img, cmap='gray')
+    axes[0].set_title("Moiré Image (Combined)")
+    axes[0].axis('off')
+    
+    # Show magnitude spectrum of the raw FFT for reference
+    magnitude_spectrum = np.log(np.abs(fshift) + 1)
+    axes[1].imshow(magnitude_spectrum, cmap='jet')
+    axes[1].set_title("FFT Magnitude (before filtering)")
+    axes[1].axis('off')
+    
+    # Show unwrapped phase
+    im2 = axes[2].imshow(phase_map_unwrapped, cmap='jet')
+    axes[2].set_title("Unwrapped Phase (related to 3D shape)")
+    axes[2].axis('off')
+    fig.colorbar(im2, ax=axes[2])
+    
+    plt.tight_layout()
+    plt.show()
+
+if __name__ == "__main__":
+    main()
