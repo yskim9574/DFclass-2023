@@ -1,0 +1,392 @@
+# 3D 형상 복원 구현 (모아래 간섭법)
+# 필요한 라이브러리 설치 및 임포트
+
+# 필요한 라이브러리 설치
+!pip install -q matplotlib numpy scipy scikit-image plotly
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import cm
+from mpl_toolkits.mplot3d import Axes3D
+from scipy.ndimage import gaussian_filter
+from skimage import restoration
+import plotly.graph_objects as go
+from IPython.display import display, clear_output
+import time
+
+# 그래프 크기 및 스타일 설정
+plt.rcParams['figure.figsize'] = [12, 8]
+plt.style.use('ggplot')
+
+# ======================= 1. 반구형 돔 생성 =======================
+def create_hemisphere(size=256, radius=100, center=None):
+    """
+    반구형 돔 높이 맵 생성
+    
+    Parameters:
+    size (int): 이미지 크기 (size x size 픽셀)
+    radius (float): 반구형의 반지름
+    center (tuple): 반구형의 중심 좌표, None인 경우 이미지 중앙
+    
+    Returns:
+    numpy.ndarray: 반구형 돔의 높이 맵
+    """
+    if center is None:
+        center = (size // 2, size // 2)
+    
+    # 좌표 그리드 생성
+    y, x = np.ogrid[:size, :size]
+    
+    # 중심으로부터의 거리 계산
+    dist_from_center = np.sqrt((x - center[0])**2 + (y - center[1])**2)
+    
+    # 반구형 높이 계산 (피타고라스 정리 이용)
+    height = np.zeros((size, size))
+    mask = dist_from_center <= radius
+    height[mask] = np.sqrt(radius**2 - dist_from_center[mask]**2)
+    
+    return height
+
+# 반구형 돔 생성 및 시각화
+size = 256
+dome_height = create_hemisphere(size=size, radius=size//4)
+
+# 돔 시각화
+plt.figure(figsize=(10, 8))
+plt.imshow(dome_height, cmap='viridis')
+plt.colorbar(label='height (pixel)')
+plt.title('hemispheical dome height map')
+plt.tight_layout()
+plt.show()
+
+# 3D 표면 시각화
+fig = plt.figure(figsize=(12, 10))
+ax = fig.add_subplot(111, projection='3d')
+y, x = np.meshgrid(np.arange(0, size, 4), np.arange(0, size, 4))
+ax.plot_surface(x, y, dome_height[::4, ::4], cmap='viridis', edgecolor='none')
+ax.set_title('hemispherical dome 3D surface')
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+ax.set_zlabel('height')
+plt.tight_layout()
+plt.show()
+
+# ======================= 2. 격자 패턴 생성 및 투영 =======================
+def create_grid_pattern(size, period, orientation=0, phase=0):
+    """
+    정현파 격자 패턴 생성
+    
+    Parameters:
+    size (int): 이미지 크기 (size x size 픽셀)
+    period (float): 격자 주기 (픽셀 단위)
+    orientation (float): 격자 방향 (라디안)
+    phase (float): 격자 위상 (라디안)
+    
+    Returns:
+    numpy.ndarray: 생성된 격자 패턴
+    """
+    y, x = np.meshgrid(np.arange(size), np.arange(size))
+    
+    # 방향 적용
+    if orientation == 0:  # 수평 격자
+        grid = np.sin(2 * np.pi * x / period + phase)
+    else:  # 수직 격자
+        grid = np.sin(2 * np.pi * y / period + phase)
+    
+    # 0-1 범위로 정규화
+    grid = (grid + 1) / 2
+    
+    return grid
+
+def project_grid_on_object(grid_pattern, height_map, proj_angle=np.pi/6):
+    """
+    격자 패턴을 물체 표면에 투영하는 시뮬레이션
+    
+    Parameters:
+    grid_pattern (numpy.ndarray): 격자 패턴
+    height_map (numpy.ndarray): 물체의 높이 맵
+    proj_angle (float): 투영 각도 (라디안)
+    
+    Returns:
+    numpy.ndarray: 투영된 격자 패턴
+    """
+    size = height_map.shape[0]
+    
+    # 높이에 따른 격자 변형 계산
+    # 격자가 물체 표면에 투영될 때 높이에 따라 왜곡됨
+    # tan(angle) * height는 높이로 인한 픽셀 이동량
+    displacement = np.tan(proj_angle) * height_map
+    
+    projected_grid = np.zeros_like(grid_pattern)
+    for i in range(size):
+        for j in range(size):
+            # 원래 격자 위치에서 높이에 따른 변위만큼 이동
+            orig_pos = j - displacement[i, j]
+            
+            # 이미지 경계 확인
+            if 0 <= orig_pos < size:
+                # 정수 부분과 소수 부분으로 분리하여 선형 보간
+                idx = int(orig_pos)
+                frac = orig_pos - idx
+                
+                if idx < size - 1:
+                    projected_grid[i, j] = (1 - frac) * grid_pattern[i, idx] + frac * grid_pattern[i, idx + 1]
+                else:
+                    projected_grid[i, j] = grid_pattern[i, idx]
+            else:
+                # 경계 밖은 0으로 설정
+                projected_grid[i, j] = 0
+    
+    return projected_grid
+
+# 격자 주기 설정 (픽셀 단위)
+grid_period = 20
+
+# 4단계 위상 이동 격자 생성 및 투영
+phases = [0, np.pi/2, np.pi, 3*np.pi/2]
+projected_patterns = []
+
+plt.figure(figsize=(16, 4))
+for i, phase in enumerate(phases):
+    # 원래 격자 패턴 생성
+    grid = create_grid_pattern(size, grid_period, orientation=0, phase=phase)
+    
+    # 격자 패턴을 반구형 돔에 투영
+    projected = project_grid_on_object(grid, dome_height, proj_angle=np.pi/6)
+    projected_patterns.append(projected)
+    
+    # 시각화
+    plt.subplot(1, 4, i+1)
+    plt.imshow(projected, cmap='gray')
+    plt.title(f'projected grid (phase {phase:.2f} rad)')
+    plt.axis('off')
+
+plt.tight_layout()
+plt.show()
+
+# ======================= 3. 위상 맵 계산 (래핑된 위상) =======================
+def calculate_wrapped_phase(patterns):
+    """
+    4단계 위상 이동 알고리즘을 사용하여 래핑된 위상 계산
+    
+    Parameters:
+    patterns (list): 4개의 위상 이동된 패턴 이미지
+    
+    Returns:
+    numpy.ndarray: 래핑된 위상 맵 (-π ~ π)
+    """
+    I1, I2, I3, I4 = patterns
+    
+    # 분자 및 분모 계산
+    numerator = I4 - I2
+    denominator = I1 - I3
+    
+    # 0 나누기 방지
+    denominator[denominator == 0] = 1e-10
+    
+    # 위상 계산 (arctan2 사용하여 -π ~ π 범위)
+    wrapped_phase = np.arctan2(numerator, denominator)
+    
+    return wrapped_phase
+
+# 래핑된 위상 맵 계산
+wrapped_phase = calculate_wrapped_phase(projected_patterns)
+
+# 래핑된 위상 맵 시각화
+plt.figure(figsize=(10, 8))
+plt.imshow(wrapped_phase, cmap='twilight', vmin=-np.pi, vmax=np.pi)
+plt.colorbar(label='phase (radian)')
+plt.title('wrapped phase map')
+plt.tight_layout()
+plt.show()
+
+# ======================= 4. 위상 언래핑 =======================
+def phase_unwrap_simple(wrapped_phase):
+    """
+    간단한 위상 언래핑 알고리즘 (행 별로 처리)
+    
+    참고: 실제 응용에서는 더 고급 알고리즘을 사용하는 것이 좋음
+    scikit-image의 restoration.unwrap_phase 같은 함수가 더 견고함
+    
+    Parameters:
+    wrapped_phase (numpy.ndarray): 래핑된 위상 맵
+    
+    Returns:
+    numpy.ndarray: 언래핑된 위상 맵
+    """
+    # scikit-image의 언래핑 함수 사용 (더 견고함)
+    unwrapped_phase = restoration.unwrap_phase(wrapped_phase)
+    
+    # 최소값을 0으로 설정 (옵션)
+    unwrapped_phase -= np.min(unwrapped_phase)
+    
+    return unwrapped_phase
+
+# 위상 언래핑 실행
+unwrapped_phase = phase_unwrap_simple(wrapped_phase)
+
+# 언래핑된 위상 맵 시각화
+plt.figure(figsize=(10, 8))
+plt.imshow(unwrapped_phase, cmap='viridis')
+plt.colorbar(label='unwrapped phase (radian)')
+plt.title('unwrapped phase map')
+plt.tight_layout()
+plt.show()
+
+# ======================= 5. 3D 형상 복원 =======================
+def convert_phase_to_height(unwrapped_phase, calibration_factor):
+    """
+    언래핑된 위상 맵을 높이 맵으로 변환
+    
+    Parameters:
+    unwrapped_phase (numpy.ndarray): 언래핑된 위상 맵
+    calibration_factor (float): 보정 상수 (위상 -> 높이 변환)
+    
+    Returns:
+    numpy.ndarray: 높이 맵
+    """
+    height_map = calibration_factor * unwrapped_phase
+    
+    return height_map
+
+# 위상-높이 변환을 위한 보정 상수 계산
+# 실제 상황에서는 보정 과정을 통해 결정됨
+# 여기서는 원래 돔의 최대 높이에 맞춰 보정 상수 계산
+calibration_factor = np.max(dome_height) / np.max(unwrapped_phase)
+
+# 위상을 높이로 변환
+reconstructed_height = convert_phase_to_height(unwrapped_phase, calibration_factor)
+
+# 원본과 복원된 높이 맵 비교
+fig, axes = plt.subplots(1, 2, figsize=(16, 8))
+im1 = axes[0].imshow(dome_height, cmap='viridis')
+axes[0].set_title('original hemisphical dome')
+plt.colorbar(im1, ax=axes[0], label='height (pixel)')
+
+im2 = axes[1].imshow(reconstructed_height, cmap='viridis')
+axes[1].set_title('reconstructed 3D shape')
+plt.colorbar(im2, ax=axes[1], label='height (pixel)')
+
+plt.tight_layout()
+plt.show()
+
+# 3D 시각화 비교
+fig = plt.figure(figsize=(18, 10))
+
+# 원본 3D 표면
+ax1 = fig.add_subplot(121, projection='3d')
+y, x = np.meshgrid(np.arange(0, size, 4), np.arange(0, size, 4))
+ax1.plot_surface(x, y, dome_height[::4, ::4], cmap='viridis', edgecolor='none')
+ax1.set_title('original hemisphical dome')
+ax1.set_xlabel('X')
+ax1.set_ylabel('Y')
+ax1.set_zlabel('height')
+
+# 복원된 3D 표면
+ax2 = fig.add_subplot(122, projection='3d')
+ax2.plot_surface(x, y, reconstructed_height[::4, ::4], cmap='viridis', edgecolor='none')
+ax2.set_title('reconstructed 3D dome')
+ax2.set_xlabel('X')
+ax2.set_ylabel('Y')
+ax2.set_zlabel('height')
+
+plt.tight_layout()
+plt.show()
+
+# ======================= 6. 오차 분석 =======================
+# 원본과 복원된 형상 간의 오차 계산
+error = dome_height - reconstructed_height
+relative_error = np.abs(error) / np.max(dome_height) * 100  # 상대 오차 (%)
+
+# 오차 시각화
+plt.figure(figsize=(10, 8))
+plt.imshow(error, cmap='RdBu')
+plt.colorbar(label='error (pixel)')
+plt.title('reconstruction error (original - reconstruction)')
+plt.tight_layout()
+plt.show()
+
+print(f'mean absolute error: {np.mean(np.abs(error)):.4f} pixel')
+print(f'max absolute error: {np.max(np.abs(error)):.4f} pixel')
+print(f'ave relative error: {np.mean(relative_error):.4f} %')
+
+# ======================= 7. 인터랙티브 3D 시각화 (Plotly) =======================
+# Plotly를 사용한 인터랙티브 3D 표면 시각화
+# 복원된 형상을 좀 더 자세히 살펴볼 수 있음
+def create_interactive_3d_plot(height_map, title='인터랙티브 3D 표면'):
+    # 서브샘플링 (속도를 위해)
+    step = 2
+    y, x = np.meshgrid(np.arange(0, height_map.shape[0], step), 
+                      np.arange(0, height_map.shape[1], step))
+    z = height_map[::step, ::step]
+    
+    # 3D 표면 생성
+    fig = go.Figure(data=[go.Surface(z=z, x=x, y=y, colorscale='viridis')])
+    
+    # 레이아웃 설정
+    fig.update_layout(
+        title=title,
+        autosize=False,
+        width=800,
+        height=800,
+        scene=dict(
+            xaxis_title='X',
+            yaxis_title='Y',
+            zaxis_title='height',
+            aspectratio=dict(x=1, y=1, z=0.5)
+        )
+    )
+    
+    return fig
+
+# 복원된 형상의 인터랙티브 3D 시각화
+fig = create_interactive_3d_plot(reconstructed_height, '복원된 3D 형상 (인터랙티브)')
+fig.show()
+
+# ======================= 8. 애니메이션: 돔 회전 =======================
+# 3D 점 생성
+def create_3d_points(height_map, step=4):
+    height, width = height_map.shape
+    x = np.arange(0, width, step)
+    y = np.arange(0, height, step)
+    x_grid, y_grid = np.meshgrid(x, y)
+    
+    x_points = x_grid.flatten()
+    y_points = y_grid.flatten()
+    z_points = height_map[y_grid.flatten(), x_grid.flatten()]
+    
+    return x_points, y_points, z_points
+
+# 3D 애니메이션 생성
+def create_rotation_animation(height_map, frames=36):
+    """
+    3D 형상 회전 애니메이션 생성
+    """
+    x, y, z = create_3d_points(height_map)
+    
+    for angle in range(0, 360, 360//frames):
+        plt.clf()
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # 산점도로 점 그리기
+        sc = ax.scatter(x, y, z, c=z, cmap='viridis', s=5, alpha=0.8)
+        
+        # 각도 설정
+        ax.view_init(elev=30, azim=angle)
+        
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('height')
+        ax.set_title(f'3D shape rotation (angle: {angle}°)')
+        
+        plt.tight_layout()
+        plt.draw()
+        plt.pause(0.01)
+        clear_output(wait=True)
+        display(plt.gcf())
+        
+    plt.close()
+
+# 회전 애니메이션 실행 (원하는 경우 주석 해제)
+# create_rotation_animation(reconstructed_height, frames=12)
