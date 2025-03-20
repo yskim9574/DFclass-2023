@@ -1,0 +1,388 @@
+import numpy as np
+import tensorflow as tf
+import matplotlib.pyplot as plt
+from tensorflow import keras
+from tensorflow.keras import layers
+import time
+
+# Set random seed for reproducibility
+np.random.seed(1234)
+tf.random.set_seed(1234)
+
+# Problem parameters
+rho = 1.0     # Density
+mu = 0.01     # Dynamic viscosity
+Re = 100      # Reynolds number
+
+# Domain dimensions
+x_min, x_max = 0.0, 2.2     # Channel length
+y_min, y_max = 0.0, 0.41    # Channel height
+
+# Cylinder parameters
+x_cylinder = 0.5            # x-coordinate of cylinder center
+y_cylinder = 0.2            # y-coordinate of cylinder center
+r_cylinder = 0.05           # Radius of cylinder (0.1m diameter)
+
+# Inlet velocity profile (parabolic)
+def inlet_velocity(y):
+    # Parabolic profile with max velocity at center
+    # u = 4*u_max*y*(H-y)/H^2 (where H is channel height)
+    u_max = 1.0  # Maximum velocity
+    H = y_max - y_min
+    return 4.0 * u_max * y * (H - y) / (H * H)
+
+# Function to check if a point is inside the cylinder
+def is_inside_cylinder(x, y):
+    return (x - x_cylinder)**2 + (y - y_cylinder)**2 <= r_cylinder**2
+
+# Generate collocation points
+def generate_collocation_points(n_domain=10000, n_boundary=2000, n_cylinder=1000):
+    # Domain points (avoiding points inside the cylinder)
+    domain_points = []
+    count = 0
+    while count < n_domain:
+        x = np.random.uniform(x_min, x_max)
+        y = np.random.uniform(y_min, y_max)
+        if not is_inside_cylinder(x, y):
+            domain_points.append([x, y])
+            count += 1
+    domain_points = np.array(domain_points)
+    
+    # Boundary points - Inlet (x=0)
+    y_inlet = np.random.uniform(y_min, y_max, n_boundary // 4)
+    x_inlet = np.zeros_like(y_inlet)
+    u_inlet = inlet_velocity(y_inlet)
+    v_inlet = np.zeros_like(y_inlet)
+    inlet_points = np.column_stack((x_inlet, y_inlet))
+    
+    # Boundary points - Outlet (x=2.2)
+    y_outlet = np.random.uniform(y_min, y_max, n_boundary // 4)
+    x_outlet = np.ones_like(y_outlet) * x_max
+    outlet_points = np.column_stack((x_outlet, y_outlet))
+    
+    # Boundary points - Upper wall (y=0.41)
+    x_upper = np.random.uniform(x_min, x_max, n_boundary // 4)
+    y_upper = np.ones_like(x_upper) * y_max
+    upper_points = np.column_stack((x_upper, y_upper))
+    
+    # Boundary points - Lower wall (y=0)
+    x_lower = np.random.uniform(x_min, x_max, n_boundary // 4)
+    y_lower = np.zeros_like(x_lower)
+    lower_points = np.column_stack((x_lower, y_lower))
+    
+    # Cylinder boundary points
+    theta = np.random.uniform(0, 2*np.pi, n_cylinder)
+    x_cyl = x_cylinder + r_cylinder * np.cos(theta)
+    y_cyl = y_cylinder + r_cylinder * np.sin(theta)
+    cylinder_points = np.column_stack((x_cyl, y_cyl))
+    
+    return domain_points, inlet_points, outlet_points, upper_points, lower_points, cylinder_points, u_inlet, v_inlet
+
+# Build the PINN model
+def build_pinn_model():
+    inputs = keras.Input(shape=(2,))  # Input: (x, y)
+    x = layers.Dense(50, activation="tanh")(inputs)
+    x = layers.Dense(50, activation="tanh")(x)
+    x = layers.Dense(50, activation="tanh")(x)
+    x = layers.Dense(50, activation="tanh")(x)
+    x = layers.Dense(50, activation="tanh")(x)
+    outputs = layers.Dense(3)(x)  # Output: (u, v, p) - velocity components and pressure
+    
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    return model
+
+# Navier-Stokes residuals
+def compute_ns_residuals(model, x, y, rho=1.0, mu=0.01):
+    """Compute the residuals of the 2D steady Navier-Stokes equations."""
+    # Convert to tensors and create variables
+    x_tensor = tf.convert_to_tensor(x, dtype=tf.float32)
+    y_tensor = tf.convert_to_tensor(y, dtype=tf.float32)
+    
+    x_var = tf.Variable(x_tensor)
+    y_var = tf.Variable(y_tensor)
+    
+    # Define variables to track
+    with tf.GradientTape(persistent=True) as tape_outer:
+        with tf.GradientTape(persistent=True) as tape_inner:
+            # Create input tensor for the model
+            xy = tf.stack([x_var, y_var], axis=1)
+            
+            # Get prediction (u, v, p)
+            uvp = model(xy)
+            u = uvp[:, 0:1]  # x-velocity
+            v = uvp[:, 1:2]  # y-velocity
+            p = uvp[:, 2:3]  # pressure
+        
+        # First derivatives
+        u_x = tape_inner.gradient(u, x_var)
+        u_y = tape_inner.gradient(u, y_var)
+        v_x = tape_inner.gradient(v, x_var)
+        v_y = tape_inner.gradient(v, y_var)
+        p_x = tape_inner.gradient(p, x_var)
+        p_y = tape_inner.gradient(p, y_var)
+        
+        del tape_inner
+    
+    # Second derivatives
+    u_xx = tape_outer.gradient(u_x, x_var)
+    u_yy = tape_outer.gradient(u_y, y_var)
+    v_xx = tape_outer.gradient(v_x, x_var)
+    v_yy = tape_outer.gradient(v_y, y_var)
+    
+    del tape_outer
+    
+    # Continuity equation: div(u) = 0
+    continuity = u_x + v_y
+    
+    # Momentum equation (x-component): rho(u*u_x + v*u_y) = -p_x + mu*(u_xx + u_yy)
+    momentum_x = rho * (u * u_x + v * u_y) + p_x - mu * (u_xx + u_yy)
+    
+    # Momentum equation (y-component): rho(u*v_x + v*v_y) = -p_y + mu*(v_xx + v_yy)
+    momentum_y = rho * (u * v_x + v * v_y) + p_y - mu * (v_xx + v_yy)
+    
+    return continuity, momentum_x, momentum_y
+
+# Train the model
+def train_pinn_model(model, epochs=10000, batch_size=1024):
+    optimizer = keras.optimizers.Adam(learning_rate=0.001)
+    
+    # Generate collocation points
+    domain_points, inlet_points, outlet_points, upper_points, lower_points, cylinder_points, u_inlet, v_inlet = generate_collocation_points()
+    
+    # Convert to tensors
+    domain_x = tf.convert_to_tensor(domain_points[:, 0], dtype=tf.float32)
+    domain_y = tf.convert_to_tensor(domain_points[:, 1], dtype=tf.float32)
+    
+    inlet_x = tf.convert_to_tensor(inlet_points[:, 0], dtype=tf.float32)
+    inlet_y = tf.convert_to_tensor(inlet_points[:, 1], dtype=tf.float32)
+    inlet_u = tf.convert_to_tensor(u_inlet, dtype=tf.float32)
+    inlet_v = tf.convert_to_tensor(v_inlet, dtype=tf.float32)
+    
+    outlet_x = tf.convert_to_tensor(outlet_points[:, 0], dtype=tf.float32)
+    outlet_y = tf.convert_to_tensor(outlet_points[:, 1], dtype=tf.float32)
+    
+    upper_x = tf.convert_to_tensor(upper_points[:, 0], dtype=tf.float32)
+    upper_y = tf.convert_to_tensor(upper_points[:, 1], dtype=tf.float32)
+    
+    lower_x = tf.convert_to_tensor(lower_points[:, 0], dtype=tf.float32)
+    lower_y = tf.convert_to_tensor(lower_points[:, 1], dtype=tf.float32)
+    
+    cylinder_x = tf.convert_to_tensor(cylinder_points[:, 0], dtype=tf.float32)
+    cylinder_y = tf.convert_to_tensor(cylinder_points[:, 1], dtype=tf.float32)
+    
+    # Training loop
+    history = {"total_loss": [], "pde_loss": [], "bc_loss": []}
+    start_time = time.time()
+    
+    for epoch in range(epochs):
+        # Use GradientTape to track gradients
+        with tf.GradientTape() as tape:
+            # PDE loss (Navier-Stokes residuals)
+            continuity, momentum_x, momentum_y = compute_ns_residuals(
+                model, domain_x, domain_y, rho, mu
+            )
+            pde_loss = tf.reduce_mean(tf.square(continuity)) + \
+                       tf.reduce_mean(tf.square(momentum_x)) + \
+                       tf.reduce_mean(tf.square(momentum_y))
+            
+            # Boundary conditions - Inlet
+            inlet_uvp = model(tf.stack([inlet_x, inlet_y], axis=1))
+            inlet_u_pred = inlet_uvp[:, 0]
+            inlet_v_pred = inlet_uvp[:, 1]
+            inlet_loss = tf.reduce_mean(tf.square(inlet_u_pred - inlet_u)) + \
+                         tf.reduce_mean(tf.square(inlet_v_pred - inlet_v))
+            
+            # Boundary conditions - Outlet (zero gradient / Neumann condition)
+            # Approximate by comparing to points slightly inside domain
+            offset = 0.01
+            outlet_inside_x = outlet_x - offset
+            outlet_uvp = model(tf.stack([outlet_x, outlet_y], axis=1))
+            outlet_inside_uvp = model(tf.stack([outlet_inside_x, outlet_y], axis=1))
+            outlet_loss = tf.reduce_mean(tf.square(outlet_uvp - outlet_inside_uvp))
+            
+            # Boundary conditions - Upper and Lower walls (no-slip)
+            upper_uvp = model(tf.stack([upper_x, upper_y], axis=1))
+            upper_u_pred = upper_uvp[:, 0]
+            upper_v_pred = upper_uvp[:, 1]
+            upper_loss = tf.reduce_mean(tf.square(upper_u_pred)) + \
+                         tf.reduce_mean(tf.square(upper_v_pred))
+            
+            lower_uvp = model(tf.stack([lower_x, lower_y], axis=1))
+            lower_u_pred = lower_uvp[:, 0]
+            lower_v_pred = lower_uvp[:, 1]
+            lower_loss = tf.reduce_mean(tf.square(lower_u_pred)) + \
+                         tf.reduce_mean(tf.square(lower_v_pred))
+            
+            # Boundary conditions - Cylinder surface (no-slip)
+            cylinder_uvp = model(tf.stack([cylinder_x, cylinder_y], axis=1))
+            cylinder_u_pred = cylinder_uvp[:, 0]
+            cylinder_v_pred = cylinder_uvp[:, 1]
+            cylinder_loss = tf.reduce_mean(tf.square(cylinder_u_pred)) + \
+                           tf.reduce_mean(tf.square(cylinder_v_pred))
+            
+            # Total boundary condition loss
+            bc_loss = inlet_loss + outlet_loss + upper_loss + lower_loss + cylinder_loss
+            
+            # Total loss
+            total_loss = pde_loss + 10.0 * bc_loss  # Weighting factor for BC
+        
+        # Compute and apply gradients
+        gradients = tape.gradient(total_loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+        
+        # Store losses
+        history["total_loss"].append(total_loss.numpy())
+        history["pde_loss"].append(pde_loss.numpy())
+        history["bc_loss"].append(bc_loss.numpy())
+        
+        if epoch % 100 == 0:
+            elapsed = time.time() - start_time
+            print(f"Epoch {epoch}: total_loss={total_loss.numpy():.4e}, "
+                  f"pde_loss={pde_loss.numpy():.4e}, "
+                  f"bc_loss={bc_loss.numpy():.4e}, "
+                  f"time={elapsed:.2f}s")
+    
+    return model, history
+
+# Evaluate model and plot results
+def evaluate_and_plot(model):
+    # Create a fine grid for evaluation
+    nx, ny = 220, 41  # Match the domain dimensions (2.2m x 0.41m)
+    x = np.linspace(x_min, x_max, nx)
+    y = np.linspace(y_min, y_max, ny)
+    X, Y = np.meshgrid(x, y)
+    
+    # Reshape for prediction
+    X_flat = X.flatten()
+    Y_flat = Y.flatten()
+    
+    # Remove points inside the cylinder
+    valid_points = []
+    for i in range(len(X_flat)):
+        if not is_inside_cylinder(X_flat[i], Y_flat[i]):
+            valid_points.append(i)
+    
+    X_valid = X_flat[valid_points]
+    Y_valid = Y_flat[valid_points]
+    
+    # Predict using the trained model
+    inputs = np.column_stack((X_valid, Y_valid))
+    predictions = model.predict(inputs, batch_size=1000)
+    
+    # Extract velocity components and pressure
+    u_pred = predictions[:, 0]
+    v_pred = predictions[:, 1]
+    p_pred = predictions[:, 2]
+    
+    # Calculate velocity magnitude
+    vel_mag = np.sqrt(u_pred**2 + v_pred**2)
+    
+    # Create result matrices with NaN values for points inside the cylinder
+    u_field = np.full(X.shape, np.nan)
+    v_field = np.full(X.shape, np.nan)
+    p_field = np.full(X.shape, np.nan)
+    vel_mag_field = np.full(X.shape, np.nan)
+    
+    # Assign predictions to valid points
+    for i, idx in enumerate(valid_points):
+        row, col = np.unravel_index(idx, X.shape)
+        u_field[row, col] = u_pred[i]
+        v_field[row, col] = v_pred[i]
+        p_field[row, col] = p_pred[i]
+        vel_mag_field[row, col] = vel_mag[i]
+    
+    # Plot velocity magnitude
+    plt.figure(figsize=(12, 5))
+    plt.contourf(X, Y, vel_mag_field, 100, cmap='jet')
+    plt.colorbar(label='Velocity Magnitude')
+    plt.title('Flow Around Cylinder - Velocity Magnitude')
+    plt.xlabel('x (m)')
+    plt.ylabel('y (m)')
+    
+    # Draw the cylinder
+    circle = plt.Circle((x_cylinder, y_cylinder), r_cylinder, color='white', fill=True)
+    plt.gca().add_patch(circle)
+    circle_outline = plt.Circle((x_cylinder, y_cylinder), r_cylinder, color='black', fill=False)
+    plt.gca().add_patch(circle_outline)
+    
+    plt.xlim(x_min, x_max)
+    plt.ylim(y_min, y_max)
+    plt.tight_layout()
+    plt.show()
+    
+    # Plot streamlines
+    plt.figure(figsize=(12, 5))
+    plt.streamplot(X.T, Y.T, u_field.T, v_field.T, color='black', density=2, linewidth=0.5)
+    plt.contourf(X, Y, vel_mag_field, 100, cmap='jet', alpha=0.7)
+    plt.colorbar(label='Velocity Magnitude')
+    plt.title('Flow Around Cylinder - Streamlines')
+    plt.xlabel('x (m)')
+    plt.ylabel('y (m)')
+    
+    # Draw the cylinder
+    circle = plt.Circle((x_cylinder, y_cylinder), r_cylinder, color='white', fill=True)
+    plt.gca().add_patch(circle)
+    circle_outline = plt.Circle((x_cylinder, y_cylinder), r_cylinder, color='black', fill=False)
+    plt.gca().add_patch(circle_outline)
+    
+    plt.xlim(x_min, x_max)
+    plt.ylim(y_min, y_max)
+    plt.tight_layout()
+    plt.show()
+    
+    # Plot pressure field
+    plt.figure(figsize=(12, 5))
+    plt.contourf(X, Y, p_field, 100, cmap='rainbow')
+    plt.colorbar(label='Pressure')
+    plt.title('Flow Around Cylinder - Pressure Field')
+    plt.xlabel('x (m)')
+    plt.ylabel('y (m)')
+    
+    # Draw the cylinder
+    circle = plt.Circle((x_cylinder, y_cylinder), r_cylinder, color='white', fill=True)
+    plt.gca().add_patch(circle)
+    circle_outline = plt.Circle((x_cylinder, y_cylinder), r_cylinder, color='black', fill=False)
+    plt.gca().add_patch(circle_outline)
+    
+    plt.xlim(x_min, x_max)
+    plt.ylim(y_min, y_max)
+    plt.tight_layout()
+    plt.show()
+    
+    # Return fields for further analysis
+    return u_field, v_field, p_field, vel_mag_field
+
+# Main execution
+def main():
+    # Build model
+    model = build_pinn_model()
+    model.summary()
+    
+    # Train model
+    print("Training the PINN model...")
+    print("This may take some time - typically 1-2 hours for good results...")
+    model, history = train_pinn_model(model, epochs=2000)  # Reduced epochs for demonstration
+    
+    # Plot loss history
+    plt.figure(figsize=(10, 6))
+    plt.semilogy(history["total_loss"], label="Total Loss")
+    plt.semilogy(history["pde_loss"], label="PDE Loss")
+    plt.semilogy(history["bc_loss"], label="BC Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.grid(True, which="both", ls="--")
+    plt.title("Training History")
+    plt.show()
+    
+    # Evaluate and plot results
+    print("Evaluating the model and plotting results...")
+    u_field, v_field, p_field, vel_mag_field = evaluate_and_plot(model)
+    
+    print("Done!")
+
+# For demonstration, you can run this in a Jupyter notebook or Google Colab
+# Note: Full training with many epochs can take hours, so adjust accordingly
+# Consider using a smaller model or fewer epochs for quick results
+if __name__ == "__main__":
+    main()
