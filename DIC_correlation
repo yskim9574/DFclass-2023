@@ -1,0 +1,252 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.ndimage import affine_transform
+from scipy.signal import correlate2d
+
+# --------------------------------------------
+# Part 1: Generate a 10x10 mm Speckle Pattern
+# --------------------------------------------
+img_size = (100, 100)  # 10 mm x 10 mm at 10 pixels/mm
+speckle_image = np.ones(img_size, dtype=float)  # white background
+
+num_speckles = 100
+np.random.seed(42)
+x_coords = np.random.randint(0, img_size[1], num_speckles)
+y_coords = np.random.randint(0, img_size[0], num_speckles)
+
+# Draw each speckle as a 3x3 black square
+for x, y in zip(x_coords, y_coords):
+    for dx in range(-1, 2):
+        for dy in range(-1, 2):
+            xi = x + dx
+            yi = y + dy
+            if 0 <= xi < img_size[1] and 0 <= yi < img_size[0]:
+                speckle_image[yi, xi] = 0
+
+# Display the reference speckle pattern
+plt.figure(figsize=(6, 6))
+plt.imshow(speckle_image, cmap='gray', origin='upper')
+plt.scatter(x_coords, y_coords, color='red', s=20)
+plt.title("Reference Speckle Pattern (100x100)")
+plt.xlabel("X (pixels)")
+plt.ylabel("Y (pixels)")
+plt.show()
+
+# --------------------------------------------
+# Part 2: Simulate Deformation (Volume Constancy)
+# --------------------------------------------
+# Deformation: 10% elongation in y and 5% contraction in x.
+scale_x = 0.95  # x-axis shrinks by 5%
+scale_y = 1.10  # y-axis stretches by 10%
+
+# In an image array, the first dimension is y (rows) and the second is x (cols).
+# Forward mapping: (y', x') = (scale_y * y, scale_x * x)
+# So the inverse mapping matrix is:
+#     [[1/scale_y,      0],
+#      [     0,    1/scale_x]]
+inv_transform = np.array([[1/scale_y, 0],
+                          [0, 1/scale_x]])
+
+# Compute the output shape so the entire deformed image is captured.
+new_height = int(np.ceil(img_size[0] * scale_y))  # ~110
+new_width  = int(np.ceil(img_size[1] * scale_x))   # ~95
+output_shape = (new_height, new_width)
+
+# Apply the affine transformation (fill outside with white, cval=1.0)
+deformed_image = affine_transform(
+    speckle_image,
+    inv_transform,
+    offset=0.0,
+    output_shape=output_shape,
+    cval=1.0,
+    mode='constant',
+    order=1
+)
+
+# Display the deformed speckle pattern.
+plt.figure(figsize=(6, 6))
+plt.imshow(deformed_image, cmap='gray', origin='upper')
+plt.title(f"Deformed Speckle Pattern ({new_height}x{new_width})")
+plt.xlabel("X (pixels)")
+plt.ylabel("Y (pixels)")
+plt.show()
+
+# --------------------------------------------
+# Part 3: Cross-Correlation for a Target Subset
+# --------------------------------------------
+# Select a target subset from the reference image.
+subset_size = 20  # 20x20 pixel subset (~2mm x 2mm)
+subset_y = 40     # row index
+subset_x = 40     # column index
+target_subset = speckle_image[subset_y:subset_y+subset_size, subset_x:subset_x+subset_size]
+
+# Expected new location in the deformed image:
+expected_y = int(round(subset_y * scale_y))
+expected_x = int(round(subset_x * scale_x))
+
+# Define a search region in the deformed image around the expected location.
+search_margin = 10  # pixels
+y_min = max(0, expected_y - search_margin)
+y_max = min(output_shape[0], expected_y + subset_size + search_margin)
+x_min = max(0, expected_x - search_margin)
+x_max = min(output_shape[1], expected_x + subset_size + search_margin)
+search_region = deformed_image[y_min:y_max, x_min:x_max]
+
+# Perform 2D cross-correlation.
+corr = correlate2d(search_region, target_subset, mode='valid')
+max_corr_idx = np.unravel_index(np.argmax(corr), corr.shape)
+matched_y = y_min + max_corr_idx[0]
+matched_x = x_min + max_corr_idx[1]
+
+print("\n--- Cross-Correlation Results ---")
+print(f"Reference subset top-left = (y={subset_y}, x={subset_x})")
+print(f"Expected location in deformed = (y={expected_y}, x={expected_x})")
+print(f"Matched location in deformed  = (y={matched_y}, x={matched_x})")
+
+# Visualization for the cross-correlation result.
+fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+axes[0].imshow(speckle_image, cmap='gray', origin='upper')
+axes[0].set_title('Reference Image')
+rect_ref = plt.Rectangle((subset_x, subset_y), subset_size, subset_size,
+                          edgecolor='red', facecolor='none', lw=2)
+axes[0].add_patch(rect_ref)
+
+axes[1].imshow(deformed_image, cmap='gray', origin='upper')
+axes[1].set_title('Deformed Image')
+rect_def = plt.Rectangle((matched_x, matched_y), subset_size, subset_size,
+                          edgecolor='red', facecolor='none', lw=2)
+axes[1].add_patch(rect_def)
+
+axes[2].imshow(corr, cmap='viridis')
+axes[2].set_title('Cross-correlation Map')
+
+plt.tight_layout()
+plt.show()
+
+# --------------------------------------------
+# Part 4: Compute and Plot Velocity (Displacement) Vectors for Each Subset
+# --------------------------------------------
+# Divide the reference image into 25 equal subsets (5 in x and 5 in y).
+num_subsets_x = 5
+num_subsets_y = 5
+subset_centers_x = []  # x-coordinate of each subset center in the reference
+subset_centers_y = []  # y-coordinate of each subset center in the reference
+displacements_x = []   # displacement in x (u)
+displacements_y = []   # displacement in y (v)
+
+for i in range(num_subsets_y):
+    for j in range(num_subsets_x):
+        center_x = j * subset_size + subset_size / 2  # center x in reference
+        center_y = i * subset_size + subset_size / 2  # center y in reference
+        subset_centers_x.append(center_x)
+        subset_centers_y.append(center_y)
+        # Deformed center after scaling:
+        center_x_def = scale_x * center_x
+        center_y_def = scale_y * center_y
+        # Displacement = deformed center - reference center.
+        displacements_x.append(center_x_def - center_x)
+        displacements_y.append(center_y_def - center_y)
+
+# Convert lists to numpy arrays.
+subset_centers_x = np.array(subset_centers_x)
+subset_centers_y = np.array(subset_centers_y)
+displacements_x = np.array(displacements_x)
+displacements_y = np.array(displacements_y)
+
+# Plot velocity vectors on the reference image.
+plt.figure(figsize=(6, 6))
+plt.imshow(speckle_image, cmap='gray', origin='upper')
+plt.quiver(subset_centers_x, subset_centers_y,
+           displacements_x, displacements_y,
+           color='red', angles='xy', scale_units='xy', scale=1, width=0.005)
+plt.title("Velocity (Displacement) Vectors per Subset")
+plt.xlabel("X (pixels)")
+plt.ylabel("Y (pixels)")
+plt.show()
+
+# --------------------------------------------
+# Part 5: Compute Strain Field from the Displacement Field
+# --------------------------------------------
+# Reshape the subset centers and displacements into 5x5 grids.
+centers_x_grid = subset_centers_x.reshape((num_subsets_y, num_subsets_x))
+centers_y_grid = subset_centers_y.reshape((num_subsets_y, num_subsets_x))
+u_grid = displacements_x.reshape((num_subsets_y, num_subsets_x))
+v_grid = displacements_y.reshape((num_subsets_y, num_subsets_x))
+
+# Initialize strain arrays.
+epsilon_xx = np.zeros_like(u_grid)
+epsilon_yy = np.zeros_like(v_grid)
+epsilon_xy = np.zeros_like(u_grid)
+
+# Grid spacing (in pixels) between subset centers.
+# For a regular grid, the spacing is constant (20 pixels in this case).
+dx = subset_size
+dy = subset_size
+
+# Compute finite differences for the interior points using central differences.
+for i in range(num_subsets_y):
+    for j in range(num_subsets_x):
+        # Compute ∂u/∂x (epsilon_xx)
+        if j == 0:
+            du_dx = (u_grid[i, j+1] - u_grid[i, j]) / (centers_x_grid[i, j+1] - centers_x_grid[i, j])
+        elif j == num_subsets_x - 1:
+            du_dx = (u_grid[i, j] - u_grid[i, j-1]) / (centers_x_grid[i, j] - centers_x_grid[i, j-1])
+        else:
+            du_dx = (u_grid[i, j+1] - u_grid[i, j-1]) / (centers_x_grid[i, j+1] - centers_x_grid[i, j-1])
+        epsilon_xx[i, j] = du_dx
+
+        # Compute ∂v/∂y (epsilon_yy)
+        if i == 0:
+            dv_dy = (v_grid[i+1, j] - v_grid[i, j]) / (centers_y_grid[i+1, j] - centers_y_grid[i, j])
+        elif i == num_subsets_y - 1:
+            dv_dy = (v_grid[i, j] - v_grid[i-1, j]) / (centers_y_grid[i, j] - centers_y_grid[i-1, j])
+        else:
+            dv_dy = (v_grid[i+1, j] - v_grid[i-1, j]) / (centers_y_grid[i+1, j] - centers_y_grid[i-1, j])
+        epsilon_yy[i, j] = dv_dy
+
+        # Compute shear strain:  ε_xy = 0.5*(∂u/∂y + ∂v/∂x)
+        # ∂u/∂y:
+        if i == 0:
+            du_dy = (u_grid[i+1, j] - u_grid[i, j]) / (centers_y_grid[i+1, j] - centers_y_grid[i, j])
+        elif i == num_subsets_y - 1:
+            du_dy = (u_grid[i, j] - u_grid[i-1, j]) / (centers_y_grid[i, j] - centers_y_grid[i-1, j])
+        else:
+            du_dy = (u_grid[i+1, j] - u_grid[i-1, j]) / (centers_y_grid[i+1, j] - centers_y_grid[i-1, j])
+        # ∂v/∂x:
+        if j == 0:
+            dv_dx = (v_grid[i, j+1] - v_grid[i, j]) / (centers_x_grid[i, j+1] - centers_x_grid[i, j])
+        elif j == num_subsets_x - 1:
+            dv_dx = (v_grid[i, j] - v_grid[i, j-1]) / (centers_x_grid[i, j] - centers_x_grid[i, j-1])
+        else:
+            dv_dx = (v_grid[i, j+1] - v_grid[i, j-1]) / (centers_x_grid[i, j+1] - centers_x_grid[i, j-1])
+        epsilon_xy[i, j] = 0.5 * (du_dy + dv_dx)
+
+# Print the computed strain values.
+print("\nComputed Strain Field (approximate):")
+print("epsilon_xx (normal strain in x):")
+print(epsilon_xx)
+print("epsilon_yy (normal strain in y):")
+print(epsilon_yy)
+print("epsilon_xy (shear strain):")
+print(epsilon_xy)
+
+# For visualization, we interpolate the strain field on a finer grid.
+# Here we contour the epsilon_yy field.
+fine_x = np.linspace(0, img_size[1], 200)
+fine_y = np.linspace(0, img_size[0], 200)
+X_fine, Y_fine = np.meshgrid(fine_x, fine_y)
+
+# Use griddata to interpolate epsilon_yy from our 5x5 grid onto the fine grid.
+from scipy.interpolate import griddata
+points = np.column_stack((centers_x_grid.flatten(), centers_y_grid.flatten()))
+values = epsilon_yy.flatten()
+epsilon_yy_fine = griddata(points, values, (X_fine, Y_fine), method='linear')
+
+plt.figure(figsize=(6, 6))
+cp = plt.contourf(X_fine, Y_fine, epsilon_yy_fine, cmap='jet', levels=20)
+plt.colorbar(cp, label=r'$\varepsilon_{yy}$')
+plt.title('Strain Contour: Normal Strain in y (ε₍yy₎)')
+plt.xlabel("X (pixels)")
+plt.ylabel("Y (pixels)")
+plt.show()
