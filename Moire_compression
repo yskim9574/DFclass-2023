@@ -1,0 +1,185 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import griddata
+from scipy.ndimage import gaussian_filter # Optional: for smoothing derivatives
+
+# --- 1. Input Parameters ---
+GRID_SIZE_MM = 15.0  # Size of one background grid square in mm
+DISPLACEMENT_PER_FRINGE_MM = 2.0 # Pitch 'p' in mm/fringe
+
+# Define the approximate boundaries of the fringe pattern in mm
+# Estimate these from the image using the grid
+# Assuming origin (0,0) is roughly the center of the bottom edge
+X_MIN_MM = -4.0 * GRID_SIZE_MM # Approx -60 mm
+X_MAX_MM = 4.0 * GRID_SIZE_MM # Approx +60 mm
+Y_MIN_MM = 0.0 * GRID_SIZE_MM # Approx 0 mm
+Y_MAX_MM = 3.0 * GRID_SIZE_MM # Approx +45 mm
+
+# Define the resolution of the calculation grid
+GRID_RESOLUTION = 200 # Number of points along each axis (adjust for detail vs speed)
+
+# --- 2. Digitized Fringe Data (CRITICAL: REPLACE WITH YOUR DATA) ---
+# This is the most important part. You need to manually or using image
+# processing software extract the (x, y) coordinates in MM for points
+# lying on each fringe line.
+#
+# Format: List of tuples [(x1, y1, N1), (x2, y2, N1), ..., (xk, yk, N2), ...]
+# Where (x, y) are coordinates in mm relative to your chosen origin.
+
+# !! EXAMPLE PLACEHOLDER DATA - REPLACE THIS !!
+# !! You need many points for each fringe order visible !!
+digitized_u_fringes = [
+    # Example points for U-field (N_u)
+    (0, 5, 0), (0, 15, 0), (0, 25, 0), (0, 35, 0), # N_u = 0 (Centerline)
+    (15, 5, 1), (14, 15, 1), (12, 25, 1), (10, 35, 1), # N_u = 1 (Right)
+    (-15, 5, 1), (-14, 15, 1), (-12, 25, 1), (-10, 35, 1), # N_u = 1 (Left - assuming symmetry U(-x) = -U(x), so Nu might be negative conventionally, adjust if needed)
+    (30, 5, 2), (28, 15, 2), (25, 25, 2), (22, 35, 2), # N_u = 2 (Right)
+    (-30, 5, 2), (-28, 15, 2), (-25, 25, 2), (-22, 35, 2), # N_u = 2 (Left)
+    # ... Add many more points for all visible Nu fringes ...
+    (55, 10, 11), (50, 25, 11), # Example for N_u = 11 near bottom right
+]
+
+digitized_v_fringes = [
+    # Example points for V-field (N_v)
+    (-40, 0, 0), (-20, 0, 0), (0, 0, 0), (20, 0, 0), (40, 0, 0), # N_v = 0 (Bottom edge)
+    (-38, 5, 1), (-18, 4, 1), (0, 3, 1), (18, 4, 1), (38, 5, 1), # N_v = 1
+    (-35, 10, 2), (-15, 9, 2), (0, 7, 2), (15, 9, 2), (35, 10, 2), # N_v = 2
+    # ... Add many more points for all visible Nv fringes ...
+    (0, 40, 12), (-10, 42, 12), (10, 42, 12), # Example points near N_v = 12
+]
+
+# Convert lists to NumPy arrays
+u_data = np.array(digitized_u_fringes)
+v_data = np.array(digitized_v_fringes)
+
+# Extract coordinates and fringe orders
+u_points = u_data[:, :2] # (x, y) coordinates
+u_values = u_data[:, 2]  # N_u values
+
+v_points = v_data[:, :2] # (x, y) coordinates
+v_values = v_data[:, 2]  # N_v values
+
+# --- 3. Create Calculation Grid ---
+x_lin = np.linspace(X_MIN_MM, X_MAX_MM, GRID_RESOLUTION)
+y_lin = np.linspace(Y_MIN_MM, Y_MAX_MM, GRID_RESOLUTION)
+grid_x, grid_y = np.meshgrid(x_lin, y_lin)
+
+# Grid spacing (needed for gradient calculation)
+dx = x_lin[1] - x_lin[0]
+dy = y_lin[1] - y_lin[0]
+
+# --- 4. Interpolate Fringe Orders onto Grid ---
+# Use 'cubic' for smoother results, 'linear' is faster/simpler
+# fill_value=np.nan ensures points outside data are marked
+Nu_on_grid = griddata(u_points, u_values, (grid_x, grid_y), method='cubic', fill_value=np.nan)
+Nv_on_grid = griddata(v_points, v_values, (grid_x, grid_y), method='cubic', fill_value=np.nan)
+
+# --- 5. Calculate Displacement Fields (U, V) in mm ---
+U_mm = Nu_on_grid * DISPLACEMENT_PER_FRINGE_MM
+V_mm = Nv_on_grid * DISPLACEMENT_PER_FRINGE_MM
+
+# Handle potential NaNs from interpolation (replace with 0 for calculations)
+U_mm = np.nan_to_num(U_mm)
+V_mm = np.nan_to_num(V_mm)
+
+# --- 6. Calculate Displacement Gradients (Numerical Differentiation) ---
+# np.gradient returns derivatives along each axis: (dV/dy, dV/dx)
+dV_dy, dV_dx = np.gradient(V_mm, dy, dx)
+dU_dy, dU_dx = np.gradient(U_mm, dy, dx)
+
+# --- Optional Smoothing ---
+# Sometimes derivatives can be noisy, apply a gentle Gaussian filter
+# sigma_pixels = 1 # Adjust smoothing strength
+# dU_dx = gaussian_filter(dU_dx, sigma=sigma_pixels)
+# dU_dy = gaussian_filter(dU_dy, sigma=sigma_pixels)
+# dV_dx = gaussian_filter(dV_dx, sigma=sigma_pixels)
+# dV_dy = gaussian_filter(dV_dy, sigma=sigma_pixels)
+
+# --- 7. Calculate Strain Components ---
+eps_xx = dU_dx
+eps_yy = dV_dy
+# Engineering shear strain
+gamma_xy = dU_dy + dV_dx
+
+# --- 8. Calculate Equivalent Strain (von Mises) ---
+# Ensure calculation stability, especially under the square root
+term1 = eps_xx**2
+term2 = eps_yy**2
+term3 = eps_xx * eps_yy
+term4 = 0.75 * gamma_xy**2 # (3/4) * gamma_xy^2
+
+# Calculate argument, ensure non-negative due to potential small numerical errors
+sqrt_argument = term1 + term2 - term3 + term4
+sqrt_argument[sqrt_argument < 0] = 0 # Clamp small negative values to zero
+
+eps_eq_vm = np.sqrt(sqrt_argument)
+
+# Mask out areas where we had NaNs originally
+mask = np.isnan(Nu_on_grid) | np.isnan(Nv_on_grid)
+eps_eq_vm[mask] = np.nan # Set equivalent strain to NaN where original data was missing
+
+
+# --- 9. Plotting ---
+plt.figure(figsize=(10, 5))
+
+# Plot Equivalent Strain Contour
+plt.contourf(grid_x, grid_y, eps_eq_vm, levels=50, cmap='jet') # Adjust levels as needed
+cbar = plt.colorbar()
+cbar.set_label('Equivalent Strain (von Mises)')
+
+# Optional: Overlay original digitized points for verification
+# plt.scatter(u_points[:, 0], u_points[:, 1], c='black', s=5, label='U-Fringe Points')
+# plt.scatter(v_points[:, 0], v_points[:, 1], c='white', s=5, label='V-Fringe Points')
+# plt.legend()
+
+# Plotting settings
+plt.xlabel('X Coordinate (mm)')
+plt.ylabel('Y Coordinate (mm)')
+plt.title('Equivalent Strain (von Mises) Contour from Moiré Fringes')
+plt.axis('equal') # Ensure correct aspect ratio
+plt.xlim(X_MIN_MM, X_MAX_MM)
+plt.ylim(Y_MIN_MM, Y_MAX_MM)
+plt.grid(True, linestyle=':', alpha=0.6)
+plt.tight_layout()
+plt.show()
+
+# --- Optional: Plot individual displacement/strain fields ---
+# plt.figure(figsize=(12, 8))
+# plt.subplot(2, 3, 1)
+# plt.contourf(grid_x, grid_y, U_mm, levels=20, cmap='viridis')
+# plt.colorbar(label='U Displacement (mm)')
+# plt.title('U Field')
+# plt.axis('equal')
+
+# plt.subplot(2, 3, 4)
+# plt.contourf(grid_x, grid_y, V_mm, levels=20, cmap='viridis')
+# plt.colorbar(label='V Displacement (mm)')
+# plt.title('V Field')
+# plt.axis('equal')
+
+# plt.subplot(2, 3, 2)
+# plt.contourf(grid_x, grid_y, eps_xx, levels=20, cmap='coolwarm')
+# plt.colorbar(label='Strain eps_xx')
+# plt.title('eps_xx')
+# plt.axis('equal')
+
+# plt.subplot(2, 3, 5)
+# plt.contourf(grid_x, grid_y, eps_yy, levels=20, cmap='coolwarm')
+# plt.colorbar(label='Strain eps_yy')
+# plt.title('eps_yy')
+# plt.axis('equal')
+
+# plt.subplot(2, 3, 3)
+# plt.contourf(grid_x, grid_y, gamma_xy, levels=20, cmap='coolwarm')
+# plt.colorbar(label='Shear Strain gamma_xy')
+# plt.title('gamma_xy')
+# plt.axis('equal')
+
+# plt.subplot(2, 3, 6)
+# plt.contourf(grid_x, grid_y, eps_eq_vm, levels=20, cmap='jet')
+# plt.colorbar(label='Equivalent Strain (von Mises)')
+# plt.title('Equivalent Strain')
+# plt.axis('equal')
+
+# plt.tight_layout()
+# plt.show()
