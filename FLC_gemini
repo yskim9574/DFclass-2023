@@ -1,0 +1,324 @@
+import numpy as np
+from scipy.optimize import fsolve
+import matplotlib.pyplot as plt
+import time # Import time to measure calculation duration
+
+# --- Material Parameters ---
+K = 300.0   # Strength coefficient (MPa)
+n = 0.25    # Strain hardening exponent
+m = 0.005   # Strain rate sensitivity exponent
+# f0 = 0.997   # Initial imperfection factor (t_B0 / t_A0) - Now defined in a list
+R = 1.6     # Anisotropy coefficient (planar isotropy)
+# t_A = 1.0 # Initial thickness (not explicitly needed for strain calculations)
+
+# --- M-K Algorithm Parameters ---
+initial_strain_A = 1e-6      # Start with a tiny strain to avoid log(0) or division by zero
+delta_eps1_A_increment = 5e-4 # Strain increment for Region A in each step
+necking_criterion_ratio = 0.15 # Failure when Delta_eps1_A / Delta_eps1_B < this value
+# (Equivalent to Delta_eps1_B / Delta_eps1_A > 1/0.1 = 10)
+max_steps = 2500             # Increased max steps slightly, can be adjusted
+solver_xtol = 1e-7           # Tolerance for fsolve
+
+# --- Imperfection Factors to Test ---
+f0_values = [0.997, 0.98, 0.96] # List of imperfection factors
+
+# --- Helper Function: Calculate Hill'48 parameters ---
+# (No changes needed in this function)
+def calculate_hill_params(rho, R_val):
+    """Calculates alpha, phi, and beta based on strain ratio rho and R."""
+    denominator_alpha = (1.0 + R_val) + R_val * rho
+    if np.abs(denominator_alpha) < 1e-9:
+        # print(f"Warning: Denominator near zero in alpha calculation for rho={rho}. Returning NaN.")
+        return np.nan, np.nan, np.nan
+
+    alpha = (R_val + (1.0 + R_val) * rho) / denominator_alpha
+
+    phi_sq_term = 1.0 - (2.0 * R_val / (1.0 + R_val)) * alpha + alpha**2
+    if phi_sq_term < -1e-9: # Allow for small numerical errors
+        # print(f"Warning: Negative term ({phi_sq_term}) in phi calculation for rho={rho}, alpha={alpha}. Returning NaN.")
+        return np.nan, np.nan, np.nan
+    phi_sq_term = max(0, phi_sq_term) # Ensure non-negative
+    phi = np.sqrt(phi_sq_term)
+
+    if np.abs(phi) < 1e-9:
+        # print(f"Warning: Phi is near zero for rho={rho}, alpha={alpha}. Returning NaN for beta.")
+        beta = np.nan
+    else:
+        beta = (1.0 + alpha * rho) / phi
+
+    if beta is not None and not np.isnan(beta) and beta <= 0:
+        pass
+        # print(f"Warning: Non-positive beta calculated ({beta}) for rho={rho}, alpha={alpha}, phi={phi}")
+
+    return alpha, phi, beta
+
+# --- Function representing the M-K equilibrium to solve iteratively ---
+# (No changes needed in this function - f0 is passed as an argument)
+def equilibrium_equation(delta_eps1_B_guess,   # Variable we solve for
+                         # Parameters needed from the current step:
+                         current_strains,      # Dict: {'eps1_A', 'eps2_A', 'eps_eq_A', 'eps1_B', 'eps2_B', 'eps_eq_B'}
+                         delta_eps1_A,         # Increment in A
+                         rho_A, alpha_A, phi_A, beta_A, # Parameters for region A
+                         K_mat, n_mat, m_mat, f0_imp, R_anis): # Material params
+
+    # 1. Calculate predicted increments and states for A
+    delta_eps2_A = rho_A * delta_eps1_A
+    delta_eps_eq_A = beta_A * delta_eps1_A
+    eps1_A_next = current_strains['eps1_A'] + delta_eps1_A
+    eps2_A_next = current_strains['eps2_A'] + delta_eps2_A
+    eps_eq_A_next = current_strains['eps_eq_A'] + delta_eps_eq_A
+    eps3_A_next = -(eps1_A_next + eps2_A_next) # Incompressibility
+
+    # --- Calculations for Region B based on delta_eps1_B_guess ---
+    delta_eps1_B = max(delta_eps1_B_guess, 1e-12) # Avoid zero or negative
+
+    # 2. Compatibility: d(eps2_A) = d(eps2_B)
+    delta_eps2_B = delta_eps2_A
+
+    # 3. Calculate strain ratio, Hill parameters for B
+    if np.abs(delta_eps1_B) < 1e-12:
+        rho_B = np.sign(delta_eps2_B) * 1e12 if delta_eps2_B != 0 else 0 # Use large number or 0 if both increments are 0
+    else:
+        rho_B = delta_eps2_B / delta_eps1_B
+
+    alpha_B, phi_B, beta_B = calculate_hill_params(rho_B, R_anis)
+
+    if any(np.isnan([alpha_B, phi_B, beta_B])) or (phi_B is not None and np.abs(phi_B) < 1e-9):
+         return 1e6 # Large error
+
+    # 4. Calculate equivalent strain increment for B
+    if np.isnan(beta_B): return 1e6
+    delta_eps_eq_B = beta_B * delta_eps1_B
+    if delta_eps_eq_B <= 0: return 1e6 # Should be positive
+
+    # 5. Calculate predicted total strains for B
+    eps1_B_next = current_strains['eps1_B'] + delta_eps1_B
+    eps2_B_next = current_strains['eps2_B'] + delta_eps2_B
+    eps_eq_B_next = current_strains['eps_eq_B'] + delta_eps_eq_B
+    eps3_B_next = -(eps1_B_next + eps2_B_next) # Incompressibility
+
+    # --- Check Equilibrium: sigma1_A * t_A = sigma1_B * t_B ---
+    if delta_eps1_A <= 1e-12:
+         strain_rate_factor_B = 1.0
+    else:
+         strain_rate_factor_B = (delta_eps1_B / delta_eps1_A)**m_mat
+
+    thickness_ratio = f0_imp * np.exp(eps3_B_next - eps3_A_next)
+
+    eps_eq_A_eff = max(eps_eq_A_next, 1e-12)
+    eps_eq_B_eff = max(eps_eq_B_next, 1e-12)
+
+    lhs = (eps_eq_A_eff)**n_mat / phi_A
+    rhs = ((eps_eq_B_eff)**n_mat * strain_rate_factor_B / phi_B) * thickness_ratio
+
+    return lhs - rhs
+
+# --- Main FLD Calculation Loop (Now iterates over f0_values) ---
+all_fld_points = {} # Dictionary to store results for each f0
+calculation_times = {} # Dictionary to store time taken for each f0
+
+rho_A_values = np.linspace(1.0, 0.0, 11) # Biaxial to Plane Strain (11 points)
+
+start_total_time = time.time()
+
+print("Starting FLD Calculations...")
+
+for f0_current in f0_values:
+    print(f"\n--- Calculating FLD for f₀ = {f0_current} ---")
+    start_f0_time = time.time()
+    fld_points_current_f0 = [] # List to store points for this specific f0
+
+    for rho_A in rho_A_values:
+        print(f"  Processing rho_A = {rho_A:.2f}")
+
+        # Initialize strains for this path
+        strains = {
+            'eps1_A': initial_strain_A, 'eps2_A': rho_A * initial_strain_A, 'eps_eq_A': 0.0,
+            'eps1_B': initial_strain_A, 'eps2_B': rho_A * initial_strain_A, 'eps_eq_B': 0.0,
+        }
+        alpha_A_init, phi_A_init, beta_A_init = calculate_hill_params(rho_A, R)
+        if any(np.isnan([alpha_A_init, phi_A_init, beta_A_init])):
+             print(f"Error: Could not calculate initial Hill parameters for rho_A={rho_A}. Skipping path.")
+             continue
+        strains['eps_eq_A'] = beta_A_init * strains['eps1_A']
+        strains['eps_eq_B'] = strains['eps_eq_A']
+
+        alpha_A, phi_A, beta_A = alpha_A_init, phi_A_init, beta_A_init
+
+        limit_strain_found = False
+        for step in range(max_steps):
+            if any(np.isnan([alpha_A, phi_A, beta_A])) or np.abs(phi_A)<1e-9:
+                print(f"Error: Invalid Hill parameters for Region A (rho_A={rho_A}). Stopping path.")
+                break
+
+            delta_eps1_A = delta_eps1_A_increment
+            initial_guess_delta_eps1_B = delta_eps1_A / f0_current # Use current f0
+
+            try:
+                # Pass f0_current to the equilibrium equation via args
+                delta_eps1_B_solution, info, ier, msg = fsolve(
+                    equilibrium_equation,
+                    x0=initial_guess_delta_eps1_B,
+                    args=(strains, delta_eps1_A, rho_A, alpha_A, phi_A, beta_A, K, n, m, f0_current, R), # Pass f0_current here
+                    full_output=True,
+                    xtol=solver_xtol
+                )
+
+                if ier != 1:
+                    # Try a slightly perturbed initial guess
+                    delta_eps1_B_solution, info, ier, msg = fsolve(
+                        equilibrium_equation,
+                        x0=initial_guess_delta_eps1_B * 1.1,
+                        args=(strains, delta_eps1_A, rho_A, alpha_A, phi_A, beta_A, K, n, m, f0_current, R),
+                        full_output=True,
+                        xtol=solver_xtol
+                     )
+                    if ier != 1:
+                        print(f"Warning: fsolve failed for rho_A={rho_A}, step={step}. Msg: {msg}. Trying smaller step.")
+                        # Option: try reducing delta_eps1_A for this step? Or just stop path.
+                        delta_eps1_A = delta_eps1_A_increment / 5.0 # Try a smaller step
+                        initial_guess_delta_eps1_B = delta_eps1_A / f0_current
+                        delta_eps1_B_solution, info, ier, msg = fsolve(
+                            equilibrium_equation, x0=initial_guess_delta_eps1_B,
+                            args=(strains, delta_eps1_A, rho_A, alpha_A, phi_A, beta_A, K, n, m, f0_current, R),
+                            full_output=True, xtol=solver_xtol
+                        )
+                        if ier != 1:
+                           print(f"   fsolve failed even with smaller step. Stopping path for rho_A={rho_A}.")
+                           break # Stop path if still failing
+
+
+            except Exception as e:
+                print(f"Error during fsolve for rho_A={rho_A}, step={step}, f0={f0_current}: {e}")
+                break # Stop processing this path
+
+            delta_eps1_B = delta_eps1_B_solution[0]
+            if delta_eps1_B <= 1e-12:
+                 print(f"Warning: Non-positive/small delta_eps1_B ({delta_eps1_B:.2e}). Stopping path.")
+                 break
+
+            # Necking criterion check
+            if delta_eps1_B < 1e-12: strain_increment_ratio = 0
+            else: strain_increment_ratio = delta_eps1_A / delta_eps1_B
+
+            if strain_increment_ratio < necking_criterion_ratio:
+                print(f"    Limit strain reached at eps1_A = {strains['eps1_A']:.4f}, eps2_A = {strains['eps2_A']:.4f}")
+                fld_points_current_f0.append((strains['eps1_A'], strains['eps2_A']))
+                limit_strain_found = True
+                break # Go to next rho_A
+
+            # Update strains if no necking
+            delta_eps2_A = rho_A * delta_eps1_A
+            delta_eps_eq_A = beta_A * delta_eps1_A
+            delta_eps2_B = delta_eps2_A
+
+            if np.abs(delta_eps1_B) < 1e-12: rho_B = np.sign(delta_eps2_B) * 1e12 if delta_eps2_B != 0 else 0
+            else: rho_B = delta_eps2_B / delta_eps1_B
+            alpha_B, phi_B, beta_B = calculate_hill_params(rho_B, R)
+
+            if any(np.isnan([alpha_B, phi_B, beta_B])):
+                 print(f"Error: Invalid Hill params for B after solve (update). rho_B={rho_B}. Stopping path.")
+                 break
+            if beta_B <=0 :
+                print(f"Warning: Non-positive beta_B ({beta_B}) during update. Stopping path.")
+                break
+            delta_eps_eq_B = beta_B * delta_eps1_B
+            if delta_eps_eq_B <=0:
+                print(f"Warning: Non-positive delta_eps_eq_B ({delta_eps_eq_B}) during update. Stopping path.")
+                break
+
+            # Update total strains
+            strains['eps1_A'] += delta_eps1_A
+            strains['eps2_A'] += delta_eps2_A
+            strains['eps_eq_A'] += delta_eps_eq_A
+            strains['eps1_B'] += delta_eps1_B
+            strains['eps2_B'] += delta_eps2_B
+            strains['eps_eq_B'] += delta_eps_eq_B
+            #--- END of Step Loop ---
+
+        if not limit_strain_found and step == max_steps - 1:
+            print(f"Warning: Max steps reached for rho_A={rho_A} (f0={f0_current}) without necking. Storing last point.")
+            fld_points_current_f0.append((strains['eps1_A'], strains['eps2_A']))
+        #--- END of rho_A Loop ---
+
+    # Store the results for the current f0
+    all_fld_points[f0_current] = np.array(fld_points_current_f0)
+    end_f0_time = time.time()
+    calculation_times[f0_current] = end_f0_time - start_f0_time
+    print(f"--- Calculation for f₀ = {f0_current} finished in {calculation_times[f0_current]:.2f} seconds ---")
+    #--- END of f0 Loop ---
+
+end_total_time = time.time()
+print(f"\nTotal calculation time: {end_total_time - start_total_time:.2f} seconds")
+
+
+# --- Plotting the FLDs (Multiple f0 values) ---
+print("\nPlotting FLDs...")
+plt.figure(figsize=(5,5)) # Adjusted figure size slightly
+
+colors = plt.cm.viridis(np.linspace(0, 0.8, len(f0_values))) # Get distinct colors
+markers = ['o', 's', '^'] # Different markers for each f0
+
+overall_min_minor_strain = 0
+overall_max_major_strain = 0
+
+# Iterate through the calculated FLDs for each f0
+for i, f0_val in enumerate(f0_values):
+    fld_points = all_fld_points.get(f0_val) # Use .get() for safety
+
+    if fld_points is not None and len(fld_points) > 0:
+        # Sort points by minor strain (x-axis) for potentially cleaner line plot
+        sorted_indices = np.argsort(fld_points[:, 1])
+        minor_strain = fld_points[sorted_indices, 1]
+        major_strain = fld_points[sorted_indices, 0]
+
+        # Plot Minor Strain (eps2) on X-axis, Major Strain (eps1) on Y-axis
+        plt.plot(minor_strain, major_strain,
+                 marker=markers[i % len(markers)], # Cycle through markers
+                 linestyle='-',
+                 color=colors[i],
+                 label=f'f₀ = {f0_val}') # Add label for legend
+
+        # Update overall limits for axis scaling
+        if i == 0: # Initialize with the first dataset
+            overall_min_minor_strain = np.min(minor_strain)
+            overall_max_major_strain = np.max(major_strain)
+        else:
+            overall_min_minor_strain = min(overall_min_minor_strain, np.min(minor_strain))
+            overall_max_major_strain = max(overall_max_major_strain, np.max(major_strain))
+
+    else:
+        print(f"No FLD points were calculated for f₀ = {f0_val}.")
+
+# --- Plotting Enhancements ---
+plt.title(f'Forming Limit Diagram (M-K Theory) Comparison\nK={K}, n={n}, m={m}, R={R}')
+plt.xlabel('Minor Principal Strain (ε₂)')
+plt.ylabel('Major Principal Strain (ε₁)')
+plt.axhline(0, color='gray', linestyle='--', linewidth=0.8)
+plt.axvline(0, color='gray', linestyle='--', linewidth=0.8)
+
+# Add strain path lines (only need to do this once)
+max_major_strain_plot = max(overall_max_major_strain * 1.1, 0.5) if overall_max_major_strain > 0 else 0.8
+min_minor_strain_plot = min(overall_min_minor_strain * 1.2, -0.1) if overall_min_minor_strain < 0 else -0.4
+max_minor_strain_plot = max(max_major_strain_plot, 0.1) # Ensure max minor covers at least biaxial case
+
+for rho in rho_A_values:
+    if np.abs(rho) < 1e-6: # Plane strain (rho=0)
+        plt.plot([0, 0], [0, max_major_strain_plot], 'k:', linewidth=0.7, alpha=0.3)
+    else:
+        eps1_line = np.array([0, max_major_strain_plot])
+        eps2_line = eps1_line * rho
+        valid_indices = (eps2_line >= min_minor_strain_plot - 0.1) & (eps2_line <= max_minor_strain_plot + 0.1) # Extend range slightly for lines
+        if np.any(valid_indices):
+             plt.plot(eps2_line[valid_indices], eps1_line[valid_indices], 'k:', linewidth=0.7, alpha=0.3)
+
+# Set plot limits based on calculated data across all f0 values
+plt.xlim(min_minor_strain_plot, max_minor_strain_plot)
+plt.ylim(0, max_major_strain_plot)
+
+plt.grid(True, linestyle=':')
+plt.legend() # Display the legend with labels for each f0
+plt.axis('equal')
+plt.show()
+
+print("\nCalculation and Plotting Complete.")
