@@ -1,0 +1,225 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import numpy as np
+from scipy.optimize import fsolve
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+import threading
+import time
+
+# --- M-K Calculation Core Logic (Functions only - NO CHANGES HERE) ---
+# ... (Keep all the functions: calculate_hill_params, equilibrium_equation, calculate_fld exactly as they were in the previous correct version) ...
+def calculate_hill_params(rho, R_val):
+    """Calculates alpha, phi, and beta based on strain ratio rho and R."""
+    denominator = (1.0 + R_val) + R_val * rho
+    if abs(denominator) < 1e-9: return np.nan, np.nan, np.nan
+    alpha = (R_val + (1.0 + R_val) * rho) / denominator
+    phi_sq_term = 1.0 - (2.0 * R_val / (1.0 + R_val)) * alpha + alpha**2
+    if phi_sq_term < -1e-9: return np.nan, np.nan, np.nan
+    phi_sq_term = max(0, phi_sq_term)
+    phi = np.sqrt(phi_sq_term)
+    if phi < 1e-9: return alpha, phi, np.nan
+    beta = (1.0 + alpha * rho) / phi
+    if beta <= 1e-9: return alpha, phi, np.nan
+    return alpha, phi, beta
+
+def equilibrium_equation(delta_eps1_B_guess, current_strains, delta_eps1_A,
+                         rho_A, alpha_A, phi_A, beta_A,
+                         K_mat, n_mat, m_mat, f0_imp, R_anis):
+    if any(np.isnan([alpha_A, phi_A, beta_A])) or phi_A < 1e-9 or beta_A <= 1e-9: return 1e10
+    delta_eps2_A = rho_A * delta_eps1_A
+    delta_eps_eq_A = beta_A * delta_eps1_A
+    eps1_A_next = current_strains['eps1_A'] + delta_eps1_A
+    eps2_A_next = current_strains['eps2_A'] + delta_eps2_A
+    eps_eq_A_next = current_strains['eps_eq_A'] + delta_eps_eq_A
+    eps3_A_next = -(eps1_A_next + eps2_A_next)
+    delta_eps1_B = max(delta_eps1_B_guess, 1e-12)
+    delta_eps2_B = delta_eps2_A
+    if abs(delta_eps1_B) < 1e-12: rho_B = np.sign(delta_eps2_B) * 1e12 if delta_eps2_B != 0 else 0
+    else: rho_B = delta_eps2_B / delta_eps1_B
+    alpha_B, phi_B, beta_B = calculate_hill_params(rho_B, R_anis)
+    if any(np.isnan([alpha_B, phi_B, beta_B])) or phi_B < 1e-9 or beta_B <= 1e-9: return 1e6
+    delta_eps_eq_B = beta_B * delta_eps1_B
+    if delta_eps_eq_B <= 0: return 1e6
+    eps1_B_next = current_strains['eps1_B'] + delta_eps1_B
+    eps2_B_next = current_strains['eps2_B'] + delta_eps2_B
+    eps_eq_B_next = current_strains['eps_eq_B'] + delta_eps_eq_B
+    eps3_B_next = -(eps1_B_next + eps2_B_next)
+    if delta_eps1_A <= 1e-12: strain_rate_factor_B = 1.0
+    else: strain_rate_factor_B = (delta_eps1_B / delta_eps1_A)**m_mat
+    thickness_ratio = f0_imp * np.exp(eps3_B_next - eps3_A_next)
+    eps_eq_A_eff = max(eps_eq_A_next, 1e-12)
+    eps_eq_B_eff = max(eps_eq_B_next, 1e-12)
+    lhs = (eps_eq_A_eff)**n_mat / phi_A
+    rhs = ((eps_eq_B_eff)**n_mat * strain_rate_factor_B / phi_B) * thickness_ratio
+    residual = lhs - rhs
+    if np.isnan(residual): return 1e6
+    return residual
+
+def calculate_fld(params, progress_callback=None):
+    try:
+        K = params['K']; n = params['n']; m = params['m']; f0 = params['f0']; R = params['R']
+        initial_strain_A = params.get('initial_strain_A', 1e-6); delta_eps1_A_increment = params.get('delta_eps1_A_increment', 5e-4)
+        necking_criterion_ratio = params.get('necking_criterion_ratio', 0.1); max_steps = params.get('max_steps', 2000)
+        num_rho_points = params.get('num_rho_points', 11)
+        fld_points = []; rho_A_values = np.linspace(1.0, 0.0, num_rho_points); total_paths = len(rho_A_values)
+        for i, rho_A in enumerate(rho_A_values):
+            if progress_callback: progress_callback(f"Processing rho_A = {rho_A:.2f} ({i+1}/{total_paths})")
+            strains = {'eps1_A': initial_strain_A, 'eps2_A': rho_A * initial_strain_A, 'eps_eq_A': 0.0,
+                       'eps1_B': initial_strain_A, 'eps2_B': rho_A * initial_strain_A, 'eps_eq_B': 0.0}
+            alpha_A_init, phi_A_init, beta_A_init = calculate_hill_params(rho_A, R)
+            if np.isnan(beta_A_init): print(f"Warning: Init Hill params fail rho_A={rho_A:.2f}. Skip."); continue
+            strains['eps_eq_A'] = beta_A_init * strains['eps1_A']; strains['eps_eq_B'] = strains['eps_eq_A']
+            alpha_A, phi_A, beta_A = alpha_A_init, phi_A_init, beta_A_init
+            if strains['eps_eq_A'] <= 0 : continue
+            limit_strain_found = False; path_failed = False
+            for step in range(max_steps):
+                if any(np.isnan([alpha_A, phi_A, beta_A])): print(f"Error: Invalid A params step {step} rho_A={rho_A:.2f}. Stop."); path_failed = True; break
+                delta_eps1_A = delta_eps1_A_increment; initial_guess_delta_eps1_B = delta_eps1_A / f0
+                try:
+                    delta_eps1_B_solution, info, ier, msg = fsolve(equilibrium_equation, x0=initial_guess_delta_eps1_B, args=(strains, delta_eps1_A, rho_A, alpha_A, phi_A, beta_A, K, n, m, f0, R), full_output=True, xtol=1e-7)
+                    if ier != 1:
+                         delta_eps1_B_solution, info, ier, msg = fsolve(equilibrium_equation, x0=initial_guess_delta_eps1_B*1.05, args=(strains, delta_eps1_A, rho_A, alpha_A, phi_A, beta_A, K, n, m, f0, R), full_output=True, xtol=1e-7)
+                         if ier != 1: print(f"Warning: fsolve fail step {step} rho_A={rho_A:.2f}. ier={ier}. Stop."); path_failed = True; break
+                except Exception as e: print(f"Error: fsolve EXCEPTION step {step} rho_A={rho_A:.2f}: {e}"); path_failed = True; break
+                delta_eps1_B = delta_eps1_B_solution[0]
+                if np.isnan(delta_eps1_B) or delta_eps1_B <= 1e-12: print(f"Warning: Invalid delta_eps1_B ({delta_eps1_B:.2e}) step {step}. Stop."); path_failed = True; break
+                if delta_eps1_B < 1e-12: strain_increment_ratio = 0
+                else: strain_increment_ratio = delta_eps1_A / delta_eps1_B
+                if strain_increment_ratio < necking_criterion_ratio: fld_points.append((strains['eps1_A'], strains['eps2_A'])); limit_strain_found = True; break
+                delta_eps2_A = rho_A * delta_eps1_A; delta_eps_eq_A = beta_A * delta_eps1_A; delta_eps2_B = delta_eps2_A
+                if abs(delta_eps1_B) < 1e-12: rho_B = np.sign(delta_eps2_B) * 1e12 if delta_eps2_B != 0 else 0
+                else: rho_B = delta_eps2_B / delta_eps1_B
+                alpha_B_upd, phi_B_upd, beta_B_upd = calculate_hill_params(rho_B, R)
+                if any(np.isnan([alpha_B_upd, phi_B_upd, beta_B_upd])): print(f"Error: Invalid B params update step {step}. Stop."); path_failed = True; break
+                delta_eps_eq_B = beta_B_upd * delta_eps1_B
+                if delta_eps_eq_B <= 0: print(f"Warning: Non-positive delta_eps_eq_B ({delta_eps_eq_B:.2e}) step {step}. Stop."); path_failed = True; break
+                strains['eps1_A'] += delta_eps1_A; strains['eps2_A'] += delta_eps2_A; strains['eps_eq_A'] += delta_eps_eq_A
+                strains['eps1_B'] += delta_eps1_B; strains['eps2_B'] += delta_eps2_B; strains['eps_eq_B'] += delta_eps_eq_B
+            if path_failed: print(f"  Path failed for rho_A = {rho_A:.2f}")
+            elif not limit_strain_found and step == max_steps - 1: print(f"Warning: Max steps rho_A={rho_A:.2f}. Store last."); fld_points.append((strains['eps1_A'], strains['eps2_A']))
+        if not fld_points: return False, "Calculation failed: No FLD points generated."
+        return True, np.array(fld_points)
+    except Exception as e: import traceback; print(f"Error in calculate_fld: {e}"); traceback.print_exc(); return False, f"Calculation Error: {e}"
+
+
+# --- Tkinter GUI Application ---
+class FLCApp:
+    def __init__(self, master):
+        self.master = master
+        master.title("FLD Calculator (M-K, Hill48)")
+        master.geometry("800x700")
+
+        self.params = {}
+        self.calculation_thread = None
+        self.calculation_running = False
+        self.fld_results = None
+
+        # Style
+        style = ttk.Style()
+        style.configure("TLabel", padding=3); style.configure("TEntry", padding=3); style.configure("TButton", padding=5)
+
+        # Define Default Values Locally
+        default_K = 300.0; default_n = 0.25; default_m = 0.005; default_f0 = 0.997; default_R = 1.6
+
+        # Input Frame
+        input_frame = ttk.Frame(master, padding="10"); input_frame.pack(side=tk.TOP, fill=tk.X)
+        ttk.Label(input_frame, text="Material Parameters:").grid(row=0, column=0, columnspan=2, sticky="w", pady=5)
+
+        # Parameter Labels and Entries
+        param_labels_and_keys = [("K (MPa):", "K"), ("n:", "n"), ("m:", "m"), ("f₀:", "f0"), ("R:", "R")] # Pair label with clean key
+        param_defaults = [str(default_K), str(default_n), str(default_m), str(default_f0), str(default_R)]
+        self.entries = {}
+
+        for i, (label_text, key) in enumerate(param_labels_and_keys): # Use tuple unpacking
+            label = ttk.Label(input_frame, text=label_text)
+            label.grid(row=i+1, column=0, sticky="w", padx=5, pady=2)
+            entry = ttk.Entry(input_frame, width=15)
+            entry.grid(row=i+1, column=1, padx=5, pady=2, sticky="w")
+            entry.insert(0, param_defaults[i])
+            self.entries[key] = entry # <<< FIX: Use the clean key ("K", "n", etc.)
+
+        # Control Frame
+        control_frame = ttk.Frame(master, padding="10"); control_frame.pack(side=tk.TOP, fill=tk.X)
+        self.calc_button = ttk.Button(control_frame, text="Calculate FLD", command=self.start_calculation)
+        self.calc_button.pack(side=tk.LEFT, padx=5)
+        self.status_label = ttk.Label(control_frame, text="Status: Ready", width=50)
+        self.status_label.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        # Plot Frame
+        plot_frame = ttk.Frame(master, padding="10"); plot_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.figure = plt.figure(figsize=(6, 5)); self.ax = self.figure.add_subplot(111)
+        self.canvas = FigureCanvasTkAgg(self.figure, master=plot_frame)
+        self.canvas_widget = self.canvas.get_tk_widget(); self.canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.toolbar = NavigationToolbar2Tk(self.canvas, plot_frame); self.toolbar.update(); self.toolbar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.plot_fld(None, {'K':default_K, 'n':default_n, 'm':default_m, 'f0':default_f0, 'R':default_R}); self.canvas.draw()
+
+    def get_parameters(self):
+        """Reads parameters from entry fields and validates them."""
+        try:
+            params = {
+                'K': float(self.entries['K'].get()), # Now uses correct key 'K'
+                'n': float(self.entries['n'].get()), # Now uses correct key 'n'
+                'm': float(self.entries['m'].get()), # Now uses correct key 'm'
+                'f0': float(self.entries['f0'].get()),# Now uses correct key 'f0' (NOT f₀)
+                'R': float(self.entries['R'].get())  # Now uses correct key 'R'
+            }
+            if not (0 < params['n'] < 1): raise ValueError("n must be between 0 and 1")
+            if params['m'] < 0: raise ValueError("m must be non-negative")
+            if not (0 < params['f0'] < 1): raise ValueError("f0 must be between 0 and 1")
+            if params['R'] <= 0: raise ValueError("R must be positive")
+            params['initial_strain_A'] = 1e-6; params['delta_eps1_A_increment'] = 5e-4
+            params['necking_criterion_ratio'] = 0.15; params['max_steps'] = 2000; params['num_rho_points'] = 11
+            return params
+        except ValueError as e: messagebox.showerror("Input Error", f"Invalid parameter value: {e}"); return None
+        except KeyError as e: messagebox.showerror("Input Error", f"Internal error: Missing parameter key: {e}"); return None # Should not happen now
+
+    def update_status(self, message): self.status_label.config(text=f"Status: {message}")
+
+    def plot_fld(self, fld_points, params):
+        self.ax.clear()
+        if fld_points is not None and len(fld_points) > 0:
+             sorted_indices = np.argsort(fld_points[:, 1]); minor_strain = fld_points[sorted_indices, 1]; major_strain = fld_points[sorted_indices, 0]
+             self.ax.plot(minor_strain, major_strain, 'bo-', label='FLD (M-K, Hill48)')
+             max_major_strain_plot = max(np.max(major_strain) * 1.1, 0.5) if len(major_strain)>0 else 0.8
+             min_minor_strain_plot = min(np.min(minor_strain) * 1.2, -0.1) if len(minor_strain)>0 and np.min(minor_strain)<0 else -0.4
+             max_minor_strain_plot = max(max_major_strain_plot*0.8, np.max(minor_strain)*1.1 if len(minor_strain)>0 and np.max(minor_strain)>0 else 0.1)
+             rho_paths = np.linspace(1.0, 0.0, params.get('num_rho_points', 11))
+             for rho_line in rho_paths:
+                 if abs(rho_line)<1e-6: self.ax.plot([0,0],[0,max_major_strain_plot],'k:',lw=0.7,alpha=0.4)
+                 else:
+                    eps1_line=np.array([0, max_major_strain_plot]); eps2_line=eps1_line*rho_line
+                    valid=(eps2_line >= min_minor_strain_plot-0.1) & (eps2_line <= max_minor_strain_plot+0.1)
+                    if np.any(valid): self.ax.plot(eps2_line[valid], eps1_line[valid], 'k:', lw=0.7, alpha=0.4)
+             self.ax.set_xlim(min_minor_strain_plot, max_minor_strain_plot); self.ax.set_ylim(0, max_major_strain_plot); self.ax.legend()
+        else:
+             self.ax.set_xlim(-0.4, 0.6); self.ax.set_ylim(0, 0.8); self.ax.text(0.5, 0.5, "Enter parameters and click Calculate", ha='center', va='center', transform=self.ax.transAxes)
+        param_str = f"K={params.get('K','?')}, n={params.get('n','?')}, m={params.get('m','?')}, f₀={params.get('f0','?')}, R={params.get('R','?')}"
+        self.ax.set_title(f"FLD (M-K, Hill48)\n{param_str}"); self.ax.set_xlabel("Minor Principal Strain (ε₂)"); self.ax.set_ylabel("Major Principal Strain (ε₁)")
+        self.ax.axhline(0, color='gray', linestyle='--', linewidth=0.8); self.ax.axvline(0, color='gray', linestyle='--', linewidth=0.8)
+        self.ax.grid(True, linestyle=':'); self.ax.axis('equal'); self.canvas.draw()
+
+    def check_calculation_thread(self):
+        if self.calculation_thread and not self.calculation_thread.is_alive():
+            self.calculation_running = False; self.calc_button.config(state=tk.NORMAL)
+            success, result = self.fld_results
+            if success: self.update_status("Plotting results..."); self.plot_fld(result, self.params); self.update_status("Calculation Complete.")
+            else: messagebox.showerror("Calculation Error", result); self.update_status(f"Error."); self.plot_fld(None, self.params)
+            self.fld_results = None; self.calculation_thread = None
+        elif self.calculation_running: self.master.after(200, self.check_calculation_thread)
+
+    def calculation_worker(self, params): self.fld_results = calculate_fld(params, self.update_status_threadsafe)
+    def update_status_threadsafe(self, message): self.master.after(0, self.update_status, message)
+
+    def start_calculation(self):
+        if self.calculation_running: messagebox.showwarning("Busy", "Calculation is already in progress."); return
+        params = self.get_parameters();
+        if params is None: return
+        self.params = params; self.update_status("Calculating..."); self.calc_button.config(state=tk.DISABLED)
+        self.calculation_running = True; self.fld_results = None
+        self.calculation_thread = threading.Thread(target=self.calculation_worker, args=(params,)); self.calculation_thread.daemon = True; self.calculation_thread.start()
+        self.master.after(100, self.check_calculation_thread)
+
+# --- Main Execution ---
+if __name__ == "__main__":
+    root = tk.Tk(); app = FLCApp(root); root.mainloop()
