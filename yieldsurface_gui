@@ -1,0 +1,133 @@
+import tkinter as tk
+from tkinter import ttk
+import numpy as np
+import matplotlib.pyplot as plt
+# No need for Axes3D explicitly
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+import math
+
+# --- Parameters (Can be made GUI inputs later if needed) ---
+SIGMA_YIELD = 1.0
+HYDROSTATIC_MIN_FACTOR = -1.5 # Factor of sigma_yield
+HYDROSTATIC_MAX_FACTOR = 1.5 # Factor of sigma_yield
+NUM_THETA = 40 # Points around cylinder
+NUM_H = 10     # Points along cylinder axis
+
+# --- Calculation Function ---
+def calculate_von_mises_points(sigma_yield, h_min_factor, h_max_factor, num_theta, num_h):
+    """Calculates points on the von Mises cylinder surface."""
+    radius = np.sqrt(2.0 / 3.0) * sigma_yield
+    hydrostatic_min = h_min_factor * sigma_yield
+    hydrostatic_max = h_max_factor * sigma_yield
+
+    h = np.linspace(hydrostatic_min, hydrostatic_max, num_h)
+    theta = np.linspace(0, 2 * np.pi, num_theta)
+    h_grid, theta_grid = np.meshgrid(h, theta)
+
+    # Parametric equations (same as before)
+    sigma1 = (h_grid / np.sqrt(3.0)) + radius * (np.cos(theta_grid) / np.sqrt(2.0) + np.sin(theta_grid) / np.sqrt(6.0))
+    sigma2 = (h_grid / np.sqrt(3.0)) + radius * (-np.cos(theta_grid) / np.sqrt(2.0) + np.sin(theta_grid) / np.sqrt(6.0))
+    sigma3 = (h_grid / np.sqrt(3.0)) + radius * (-2.0 * np.sin(theta_grid) / np.sqrt(6.0))
+
+    # Alternative derivation using axis rotation (might be simpler conceptually)
+    # Points on cylinder in (h, r*cos, r*sin) aligned frame
+    # x_cyl = h_grid
+    # y_cyl = radius * np.cos(theta_grid)
+    # z_cyl = radius * np.sin(theta_grid)
+    # Rotate this frame so x_cyl aligns with (1,1,1)/sqrt(3)
+    # Requires rotation matrix... let's stick to the first method for now
+
+    # Calculate limits for plotting axis line and box
+    axis_lim_val = max(abs(hydrostatic_min), abs(hydrostatic_max)) * 1.0 # Axis line length based on h range
+    plot_lim = axis_lim_val * 1.1 # Box limit slightly larger
+
+    return sigma1, sigma2, sigma3, axis_lim_val, plot_lim
+
+# --- Tkinter GUI Application ---
+class VonMisesApp:
+    def __init__(self, master):
+        self.master = master
+        master.title("Interactive von Mises Yield Surface")
+        master.geometry("700x750") # Adjust size
+
+        # Frame for plot
+        plot_frame = ttk.Frame(master, padding="10")
+        plot_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        # --- Matplotlib Figure and Axes ---
+        self.figure = plt.figure(figsize=(7, 7)) # Adjust figure size
+        self.ax = self.figure.add_subplot(111, projection='3d')
+
+        # --- Canvas and Toolbar ---
+        self.canvas = FigureCanvasTkAgg(self.figure, master=plot_frame)
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        # IMPORTANT: Add the standard Matplotlib navigation toolbar
+        # This toolbar provides zoom, pan, and importantly, interactive 3D rotation
+        self.toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
+        self.toolbar.update()
+        self.toolbar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # --- Initial Plot ---
+        self.plot_yield_surface()
+
+    def plot_yield_surface(self):
+        """Calculates and plots the von Mises surface."""
+        self.ax.clear() # Clear previous plot contents
+
+        # Calculate points
+        s1, s2, s3, axis_lim, plot_lim = calculate_von_mises_points(
+            SIGMA_YIELD, HYDROSTATIC_MIN_FACTOR, HYDROSTATIC_MAX_FACTOR, NUM_THETA, NUM_H
+        )
+
+        # Plot the yield surface
+        self.ax.plot_surface(s1, s2, s3, cmap='viridis', alpha=0.7, edgecolor='k', linewidth=0.1, rstride=1, cstride=1) # Added rstride/cstride
+
+        # Plot Hydrostatic Axis
+        ax_h_coord = axis_lim / np.sqrt(3.0) # Coordinate along axis direction
+        self.ax.plot([0, ax_h_coord], [0, ax_h_coord], [0, ax_h_coord], 'r--', linewidth=1.5, label='Hydrostatic Axis')
+        self.ax.plot([0, -ax_h_coord], [0, -ax_h_coord], [0, -ax_h_coord], 'r--', linewidth=1.5)
+
+        # Plot Bounding Box (Optional, can make plot busy)
+        lim = plot_lim # Use calculated limit
+        # You can uncomment these lines if you want the box
+        # self.ax.plot([-lim, lim], [-lim, -lim], [-lim, -lim], 'k-', linewidth=0.8, alpha=0.5)
+        # self.ax.plot([-lim, lim], [ lim,  lim], [-lim, -lim], 'k-', linewidth=0.8, alpha=0.5)
+        # # ... (rest of the box plotting lines) ...
+
+        # Axes Labels and Title
+        self.ax.set_xlabel('$\sigma_1$')
+        self.ax.set_ylabel('$\sigma_2$')
+        self.ax.set_zlabel('$\sigma_3$')
+        self.ax.set_title('von Mises Yield Surface (Click & Drag to Rotate)', fontsize=12)
+
+        # Set Limits and Aspect Ratio
+        # Setting limits slightly larger than the box itself can look better
+        view_lim = lim * 1.1
+        self.ax.set_xlim(-view_lim, view_lim)
+        self.ax.set_ylim(-view_lim, view_lim)
+        self.ax.set_zlim(-view_lim, view_lim)
+        try:
+             # This is the preferred way for equal scaling in 3D
+             self.ax.set_box_aspect([1,1,1])
+        except AttributeError:
+             # Fallback for older Matplotlib versions (less reliable)
+             self.ax.axis('equal')
+
+
+        # Set initial view
+        self.ax.view_init(elev=25., azim=-120)
+
+        # Add legend for hydrostatic axis
+        self.ax.legend()
+
+        # Redraw the canvas
+        self.canvas.draw()
+
+
+# --- Main Execution ---
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = VonMisesApp(root)
+    root.mainloop()
