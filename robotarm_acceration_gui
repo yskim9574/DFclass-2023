@@ -1,0 +1,414 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import numpy as np
+import math
+import matplotlib.pyplot as plt
+# Change GridSpec for better layout control
+from matplotlib.gridspec import GridSpec
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+import time
+
+# --- Robot Arm Parameters ---
+LINK_LENGTHS = [38.0, 38.0, 38.0]
+TOTAL_ARM_LENGTH = sum(LINK_LENGTHS)
+NUM_LINKS = len(LINK_LENGTHS)
+
+# --- Path Definition (From Image) ---
+POINT_A = np.array([95.0, 0.0])
+POINT_B = np.array([95.0, 45.0])
+POINT_C = np.array([45.0, 95.0])
+POINT_D = np.array([-15.0, 95.0])
+
+PATH_DATA = [ (POINT_A, POINT_B, 5.0), (POINT_B, POINT_C, 5.0), (POINT_C, POINT_D, 5.0)]
+CUMULATIVE_TIMES = np.cumsum([0.0] + [seg[2] for seg in PATH_DATA])
+TOTAL_PATH_DURATION = CUMULATIVE_TIMES[-1]
+
+# --- Initial Joint Positions (From Image - State at Time=0s, Point A) ---
+INITIAL_JOINT_POSITIONS = [
+    np.array([0.0, 0.0]),      # J0 (Base O)
+    np.array([36.70, 9.83]),   # J1
+    np.array([62.0, -18.9]), # J2
+    np.array([95.0, 0.0])      # J3 (End Effector A)
+]
+# Verify initial link lengths (Important!) - Use calculated initial pose if needed
+initial_lengths_ok = True
+for i in range(NUM_LINKS):
+    l_calc = np.linalg.norm(INITIAL_JOINT_POSITIONS[i+1] - INITIAL_JOINT_POSITIONS[i])
+    if not np.isclose(l_calc, LINK_LENGTHS[i], atol=0.1): # Allow small tolerance
+        print(f"Warning: Initial pose Link {i+1} length mismatch ({l_calc:.2f} vs {LINK_LENGTHS[i]})")
+        initial_lengths_ok = False
+        # break # Decide whether to stop or continue if initial pose invalid
+
+# --- Simulation Parameters ---
+TIME_STEP = 0.05 # Simulation update interval in seconds
+FABRIK_TOLERANCE = 0.1
+FABRIK_MAX_ITERATIONS = 25
+
+# --- FABRIK Inverse Kinematics (Unchanged) ---
+def calculate_ik_fabrik(target_pos, joint_positions_initial):
+    global LINK_LENGTHS, TOTAL_ARM_LENGTH, NUM_LINKS, FABRIK_TOLERANCE, FABRIK_MAX_ITERATIONS
+    num_joints = NUM_LINKS + 1
+    current_joint_positions = [p.copy() for p in joint_positions_initial]
+    base_pos = current_joint_positions[0]
+    target_pos = np.array(target_pos)
+    dist_base_target = np.linalg.norm(target_pos - base_pos)
+    if dist_base_target > TOTAL_ARM_LENGTH + FABRIK_TOLERANCE: return None
+    current_end_effector_pos = current_joint_positions[-1]
+    dist_diff = np.linalg.norm(current_end_effector_pos - target_pos)
+    iterations = 0
+    while dist_diff > FABRIK_TOLERANCE and iterations < FABRIK_MAX_ITERATIONS:
+        current_joint_positions[-1] = target_pos
+        for i in range(num_joints - 2, -1, -1):
+            vec = current_joint_positions[i+1] - current_joint_positions[i]
+            dist = max(np.linalg.norm(vec), 1e-6); lambda_scale = LINK_LENGTHS[i] / dist
+            current_joint_positions[i] = current_joint_positions[i+1] - lambda_scale * vec
+        current_joint_positions[0] = base_pos
+        for i in range(num_joints - 1):
+            vec = current_joint_positions[i+1] - current_joint_positions[i]
+            dist = max(np.linalg.norm(vec), 1e-6); lambda_scale = LINK_LENGTHS[i] / dist
+            current_joint_positions[i+1] = current_joint_positions[i] + lambda_scale * vec
+        current_end_effector_pos = current_joint_positions[-1]
+        dist_diff = np.linalg.norm(current_end_effector_pos - target_pos)
+        iterations += 1
+    if dist_diff <= FABRIK_TOLERANCE: return current_joint_positions
+    else: return None
+
+# --- Angle Calculation ---
+def calculate_link_angles(joint_positions):
+    """ Calculates absolute and relative angles from joint positions"""
+    angles_abs = [] # Absolute angle w.r.t global X axis
+    angles_rel = [] # Angle w.r.t previous link
+    thetas = []     # theta1, theta2, theta3 as commonly defined
+
+    # Calculate absolute angles
+    for i in range(NUM_LINKS):
+        dx = joint_positions[i+1][0] - joint_positions[i][0]
+        dy = joint_positions[i+1][1] - joint_positions[i][1]
+        angles_abs.append(math.atan2(dy, dx))
+
+    # Calculate relative angles (theta1, theta2, theta3)
+    thetas.append(angles_abs[0]) # theta1 is the absolute angle of link 1
+    for i in range(1, NUM_LINKS):
+        # Relative angle = current absolute - previous absolute
+        # Handle angle wrapping for continuity if needed, but direct diff often ok for derivatives
+        relative_angle = angles_abs[i] - angles_abs[i-1]
+        # Normalize angle to [-pi, pi] - important for consistency
+        relative_angle = (relative_angle + math.pi) % (2 * math.pi) - math.pi
+        thetas.append(relative_angle)
+
+    return thetas # Returns [theta1, theta2, theta3] in radians
+
+# --- Tkinter GUI Application ---
+class RobotArmApp:
+    def __init__(self, master):
+        self.master = master
+        master.title("3-Link Robot Arm Path Following with Acceleration")
+        master.geometry("1000x900") # Wider window for plots
+
+        self.link_lengths = LINK_LENGTHS
+        self.num_links = NUM_LINKS
+        self.path_data = PATH_DATA
+        self.cumulative_times = CUMULATIVE_TIMES
+        self.total_path_duration = TOTAL_PATH_DURATION
+        self.dt = TIME_STEP
+
+        # Simulation State
+        self.is_running = False
+        self.simulation_time = 0.0
+        self.joint_positions = [p.copy() for p in INITIAL_JOINT_POSITIONS]
+        self.animation_job = None
+
+        # History for plotting acceleration
+        self.time_history = []
+        self.theta1_history = []
+        self.theta2_history = []
+        self.theta3_history = []
+        self.omega1_history = [] # Angular velocities
+        self.omega2_history = []
+        self.omega3_history = []
+        self.alpha1_history = [] # Angular accelerations
+        self.alpha2_history = []
+        self.alpha3_history = []
+        self.prev_thetas = None # Store previous angles for velocity calculation
+        self.prev_omegas = None # Store previous velocities for acceleration calculation
+
+        # --- GUI Setup ---
+        # Control Frame on the Left
+        control_frame = ttk.Frame(master, padding="10")
+        control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        ttk.Label(control_frame, text="Simulation Control", font=("Arial", 12, "bold")).pack(pady=10)
+        self.start_button = ttk.Button(control_frame, text="Start", command=self.start_simulation)
+        self.start_button.pack(pady=5, fill=tk.X)
+        self.stop_button = ttk.Button(control_frame, text="Stop", command=self.stop_simulation, state=tk.DISABLED)
+        self.stop_button.pack(pady=5, fill=tk.X)
+        self.reset_button = ttk.Button(control_frame, text="Reset to Start (A)", command=self.reset_simulation)
+        self.reset_button.pack(pady=5, fill=tk.X)
+        ttk.Separator(control_frame, orient=tk.HORIZONTAL).pack(pady=15, fill=tk.X)
+        self.status_label = ttk.Label(control_frame, text="Status: Ready", wraplength=150)
+        self.status_label.pack(pady=5, fill=tk.X)
+        self.time_label = ttk.Label(control_frame, text="Time: 0.00 s")
+        self.time_label.pack(pady=5)
+        self.pos_label = ttk.Label(control_frame, text="End Effector: (?.?, ?.?)")
+        self.pos_label.pack(pady=5)
+        self.joint_pos_labels = []
+        ttk.Label(control_frame, text="Joint Positions:").pack(pady=(10,2))
+        for i in range(self.num_links + 1):
+             lbl = ttk.Label(control_frame, text=f" J{i}: (?.?, ?.?)")
+             lbl.pack(anchor='w'); self.joint_pos_labels.append(lbl)
+
+        # Plotting Area on the Right (using GridSpec for layout)
+        plot_area_frame = ttk.Frame(master, padding="10")
+        plot_area_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        # Create Figure and GridSpec
+        self.figure = plt.figure(figsize=(8, 8)) # Adjusted figure size
+        gs = GridSpec(3, 1, figure=self.figure, height_ratios=[3, 1, 1], hspace=0.4) # 3 rows, 1 col
+
+        # Main arm plot axes (Top, larger)
+        self.ax_arm = self.figure.add_subplot(gs[0, 0])
+        # Acceleration plot axes (Below)
+        self.ax_accel1 = self.figure.add_subplot(gs[1, 0], sharex=self.ax_arm) # Share X axis (time)
+        self.ax_accel2 = self.figure.add_subplot(gs[2, 0], sharex=self.ax_arm) # Share X axis (time)
+        # self.ax_accel3 = self.figure.add_subplot(gs[3, 0], sharex=self.ax_arm) # Share X axis (time) # If plotting all 3 separately
+
+        self.canvas = FigureCanvasTkAgg(self.figure, master=plot_area_frame)
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.toolbar = NavigationToolbar2Tk(self.canvas, plot_area_frame)
+        self.toolbar.update(); self.toolbar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Initialize Arm Position and Plot
+        self.reset_simulation()
+
+    def initialize_arm_position(self):
+        """Sets the arm to the starting position from the image data."""
+        self.joint_positions = [p.copy() for p in INITIAL_JOINT_POSITIONS]
+        # Calculate initial angles, velocities (0), accelerations (0)
+        if not initial_lengths_ok:
+             messagebox.showwarning("Initial Pose Warning", "Initial joint positions from image may not match link lengths exactly.")
+        thetas = calculate_link_angles(self.joint_positions)
+        self.prev_thetas = thetas
+        self.prev_omegas = [0.0, 0.0, 0.0]
+        print("Initialized arm position using provided data for Point A.")
+
+    def clear_history(self):
+        """Clears the stored history data."""
+        self.time_history.clear()
+        self.theta1_history.clear(); self.theta2_history.clear(); self.theta3_history.clear()
+        self.omega1_history.clear(); self.omega2_history.clear(); self.omega3_history.clear()
+        self.alpha1_history.clear(); self.alpha2_history.clear(); self.alpha3_history.clear()
+        self.prev_thetas = None
+        self.prev_omegas = None
+
+
+    def draw_simulation_state(self, target_point=None):
+        """Clears plots and redraws everything."""
+        # --- Clear Axes ---
+        self.ax_arm.clear()
+        self.ax_accel1.clear()
+        self.ax_accel2.clear()
+        # self.ax_accel3.clear()
+
+        # --- Draw Arm and Path on ax_arm ---
+        path_points = [seg[0] for seg in self.path_data] + [self.path_data[-1][1]]
+        point_labels = ['A', 'B', 'C', 'D']; path_colors = ['#6082B6']*3
+        for i, (start, end, duration) in enumerate(self.path_data):
+             self.ax_arm.plot([start[0], end[0]], [start[1], end[1]], linestyle='--', color=path_colors[i], marker='', zorder=1)
+        for i, p in enumerate(path_points):
+            self.ax_arm.plot(p[0], p[1], 'o', mfc='white', mec=path_colors[0], markersize=7, zorder=2)
+            self.ax_arm.text(p[0] + 3, p[1] + 3, f"{point_labels[i]}({p[0]:.0f},{p[1]:.0f})\n{self.cumulative_times[i]:.0f}sec", fontsize=9, zorder=4)
+        joint_x = [p[0] for p in self.joint_positions]; joint_y = [p[1] for p in self.joint_positions]
+        self.ax_arm.plot(joint_x, joint_y, 'o-', color='#367588', linewidth=3, markersize=8, mfc='black', mec='black', zorder=3, label='Robot Arm')
+        self.ax_arm.plot(0, 0, 'ks', markersize=10, label='Base O'); self.ax_arm.text(-5,-5,"O", fontsize=9, zorder=4)
+        for i in range(self.num_links):
+             mid_x = (joint_x[i] + joint_x[i+1])/2; mid_y = (joint_y[i] + joint_y[i+1])/2
+             self.ax_arm.text(mid_x, mid_y - 5, f'$l_{i+1}$={self.link_lengths[i]:.0f}', fontsize=9, ha='center', zorder=4, color='#367588')
+        if target_point is not None: self.ax_arm.plot(target_point[0], target_point[1], 'g*', markersize=12, label='Target', zorder=2)
+        # Arm Plot Formatting
+        all_x = [p[0] for p in path_points] + [0] + [p[0] for p in self.joint_positions]
+        all_y = [p[1] for p in path_points] + [0] + [p[1] for p in self.joint_positions]
+        x_min, x_max = min(all_x), max(all_x); y_min, y_max = min(all_y), max(all_y)
+        x_range = x_max - x_min; y_range = y_max - y_min
+        buffer = max(x_range, y_range) * 0.15; buffer = max(buffer, 30)
+        self.ax_arm.set_xlim(x_min - buffer, x_max + buffer); self.ax_arm.set_ylim(y_min - buffer, y_max + buffer)
+        self.ax_arm.set_aspect('equal', adjustable='box'); self.ax_arm.set_xlabel("X (cm)"); self.ax_arm.set_ylabel("Y (cm)")
+        self.ax_arm.set_title("Robot Arm Path Following"); self.ax_arm.grid(True, linestyle=':')
+
+        # --- Draw Acceleration Plots ---
+        if len(self.time_history) > 1: # Need at least two points to plot lines
+            # Plot Link 1 (Theta 1) Acceleration
+            self.ax_accel1.plot(self.time_history, self.alpha1_history, 'r-', label='Link 1 Accel ($\\alpha_1$)')
+            # Plot Link 2 (Theta 2) Acceleration
+            self.ax_accel2.plot(self.time_history, self.alpha2_history, 'g-', label='Link 2 Accel ($\\alpha_2$)')
+            # Plot Link 3 (Theta 3) Acceleration (Plot on ax_accel2 for now)
+            self.ax_accel2.plot(self.time_history, self.alpha3_history, 'b-', label='Link 3 Accel ($\\alpha_3$)')
+
+        # Acceleration Plot Formatting
+        self.ax_accel1.set_ylabel("Ang. Accel (rad/s²)")
+        self.ax_accel1.legend(loc='upper right', fontsize='small')
+        self.ax_accel1.grid(True, linestyle=':')
+        plt.setp(self.ax_accel1.get_xticklabels(), visible=False) # Hide x-tick labels for upper plot
+
+        self.ax_accel2.set_xlabel("Time (s)")
+        self.ax_accel2.set_ylabel("Ang. Accel (rad/s²)")
+        self.ax_accel2.legend(loc='upper right', fontsize='small')
+        self.ax_accel2.grid(True, linestyle=':')
+        # self.ax_accel3.set_xlabel("Time (s)") # Only needed for bottom-most plot
+        # self.ax_accel3.set_ylabel("Link 3 Accel (rad/s²)")
+        # self.ax_accel3.legend(loc='upper right')
+        # self.ax_accel3.grid(True, linestyle=':')
+
+        # Adjust layout tightly
+        # self.figure.tight_layout(pad=1.5) # Sometimes causes issues with TkAgg
+        plt.subplots_adjust(bottom=0.1, top=0.95, hspace=0.4) # Manual adjustment
+
+        self.canvas.draw()
+
+
+    def update_simulation(self):
+        """Performs one step of the time-driven simulation animation."""
+        if not self.is_running: return
+
+        # 1. Increment simulation time
+        self.simulation_time += self.dt
+        if self.simulation_time > self.total_path_duration:
+            self.simulation_time = self.total_path_duration # Cap
+
+        # 2. Determine current segment and interpolation factor
+        current_segment_index = -1
+        for i in range(len(self.cumulative_times) - 1):
+            if self.cumulative_times[i] <= self.simulation_time <= self.cumulative_times[i+1]:
+                current_segment_index = i; break
+        if current_segment_index == -1 and self.simulation_time >= self.total_path_duration:
+            current_segment_index = len(self.path_data) - 1
+        if current_segment_index == -1: self.stop_simulation("Error finding segment."); return
+
+        segment_start_time = self.cumulative_times[current_segment_index]
+        segment_duration = self.path_data[current_segment_index][2]
+        if segment_duration < 1e-6: lerp_factor = 1.0
+        else: time_in_segment = self.simulation_time - segment_start_time; lerp_factor = min(max(0.0, time_in_segment / segment_duration), 1.0)
+
+        # 3. Calculate target point
+        segment_start_pt = self.path_data[current_segment_index][0]
+        segment_end_pt = self.path_data[current_segment_index][1]
+        target_point = segment_start_pt + lerp_factor * (segment_end_pt - segment_start_pt)
+
+        # 4. Calculate Inverse Kinematics (FABRIK)
+        solved_positions = calculate_ik_fabrik(target_point, self.joint_positions)
+
+        # 5. Update arm state and calculate derivatives if IK successful
+        current_thetas = None
+        current_omegas = [0.0, 0.0, 0.0] # Default if first step or failure
+        current_alphas = [0.0, 0.0, 0.0]
+
+        if solved_positions:
+            self.joint_positions = solved_positions
+            self.status_label.config(text="Status: Running")
+
+            # Calculate Angles, Velocity, Acceleration
+            current_thetas = calculate_link_angles(self.joint_positions)
+
+            if self.prev_thetas is not None: # Can calculate velocity
+                delta_theta1 = current_thetas[0] - self.prev_thetas[0]
+                delta_theta2 = current_thetas[1] - self.prev_thetas[1]
+                delta_theta3 = current_thetas[2] - self.prev_thetas[2]
+                # Handle angle wrapping for velocity calculation? Optional, but can smooth plots.
+                delta_theta1 = (delta_theta1 + math.pi) % (2 * math.pi) - math.pi
+                delta_theta2 = (delta_theta2 + math.pi) % (2 * math.pi) - math.pi
+                delta_theta3 = (delta_theta3 + math.pi) % (2 * math.pi) - math.pi
+
+                current_omegas[0] = delta_theta1 / self.dt
+                current_omegas[1] = delta_theta2 / self.dt
+                current_omegas[2] = delta_theta3 / self.dt
+
+                if self.prev_omegas is not None: # Can calculate acceleration
+                    delta_omega1 = current_omegas[0] - self.prev_omegas[0]
+                    delta_omega2 = current_omegas[1] - self.prev_omegas[1]
+                    delta_omega3 = current_omegas[2] - self.prev_omegas[2]
+                    current_alphas[0] = delta_omega1 / self.dt
+                    current_alphas[1] = delta_omega2 / self.dt
+                    current_alphas[2] = delta_omega3 / self.dt
+
+            # Store history
+            self.time_history.append(self.simulation_time)
+            self.theta1_history.append(current_thetas[0])
+            self.theta2_history.append(current_thetas[1])
+            self.theta3_history.append(current_thetas[2])
+            self.omega1_history.append(current_omegas[0])
+            self.omega2_history.append(current_omegas[1])
+            self.omega3_history.append(current_omegas[2])
+            self.alpha1_history.append(current_alphas[0])
+            self.alpha2_history.append(current_alphas[1])
+            self.alpha3_history.append(current_alphas[2])
+
+            # Update state for next step
+            self.prev_thetas = current_thetas
+            self.prev_omegas = current_omegas
+
+        else: # IK Failed
+            self.stop_simulation(f"IK Failed at t={self.simulation_time:.2f}")
+            self.draw_simulation_state(target_point) # Draw target where it failed
+            return
+
+        # 6. Update GUI labels
+        self.time_label.config(text=f"Time: {self.simulation_time:.2f} s")
+        ee_pos = self.joint_positions[-1]
+        self.pos_label.config(text=f"End Effector: ({ee_pos[0]:.1f}, {ee_pos[1]:.1f})")
+        for i, pos in enumerate(self.joint_positions):
+             self.joint_pos_labels[i].config(text=f" J{i}: ({pos[0]:.2f}, {pos[1]:.2f})")
+
+        # 7. Redraw plots
+        self.draw_simulation_state(target_point)
+
+        # 8. Continue or stop
+        if self.simulation_time >= self.total_path_duration:
+            self.stop_simulation("Path Finished.")
+        else:
+            self.animation_job = self.master.after(int(self.dt * 1000), self.update_simulation)
+
+    # --- Simulation Control Methods ---
+    def start_simulation(self):
+        if self.is_running: return
+        if self.simulation_time >= self.total_path_duration: self.reset_simulation()
+        self.is_running = True
+        self.start_button.config(state=tk.DISABLED); self.stop_button.config(state=tk.NORMAL)
+        self.reset_button.config(state=tk.DISABLED); self.status_label.config(text="Status: Running")
+        self.update_simulation()
+
+    def stop_simulation(self, status_msg="Stopped"):
+        if not self.is_running: return
+        self.is_running = False
+        if self.animation_job: self.master.after_cancel(self.animation_job); self.animation_job = None
+        self.start_button.config(state=tk.NORMAL); self.stop_button.config(state=tk.DISABLED)
+        self.reset_button.config(state=tk.NORMAL); self.status_label.config(text=f"Status: {status_msg}")
+
+    def reset_simulation(self):
+        self.stop_simulation("Reset")
+        self.simulation_time = 0.0
+        self.clear_history() # Clear stored plot data
+        self.initialize_arm_position() # Use defined initial state
+        # Update all labels based on initial state
+        self.time_label.config(text="Time: 0.00 s")
+        ee_pos = self.joint_positions[-1]
+        self.pos_label.config(text=f"End Effector: ({ee_pos[0]:.1f}, {ee_pos[1]:.1f})")
+        for i, pos in enumerate(self.joint_positions):
+             self.joint_pos_labels[i].config(text=f" J{i}: ({pos[0]:.2f}, {pos[1]:.2f})")
+        # Add initial state to history for plotting start point
+        thetas = calculate_link_angles(self.joint_positions)
+        self.time_history.append(0.0)
+        self.theta1_history.append(thetas[0]); self.theta2_history.append(thetas[1]); self.theta3_history.append(thetas[2])
+        self.omega1_history.append(0.0); self.omega2_history.append(0.0); self.omega3_history.append(0.0)
+        self.alpha1_history.append(0.0); self.alpha2_history.append(0.0); self.alpha3_history.append(0.0)
+        self.prev_thetas = thetas
+        self.prev_omegas = [0.0, 0.0, 0.0]
+
+        self.draw_simulation_state(target_point=self.path_data[0][0]) # Draw initial state
+        self.status_label.config(text="Status: Ready")
+        self.reset_button.config(state=tk.NORMAL)
+
+
+# --- Main Execution ---
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = RobotArmApp(root)
+    root.mainloop()
