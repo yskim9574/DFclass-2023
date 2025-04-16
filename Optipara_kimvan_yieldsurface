@@ -1,0 +1,56 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import least_squares
+
+# Define the invariants and yield function
+def j2(s1, s2):
+    return (1/3) * (s1**2 - s1*s2 + s2**2)
+
+def j3(s1, s2):
+    return (1/27) * (2*s1**3 + 2*s2**3 - 3*(s1+s2)*s1*s2)
+
+def yield_func(s1, s2, alpha, beta, k):
+    J2 = j2(s1, s2)
+    J3 = j3(s1, s2)
+    return J2**3 + alpha*(J3**2) + beta*(J2**1.5)*J3 - k**6
+
+# Modified experimental data points (σ1, σ2)
+sigma1_exp = np.array([10, 13, 14, 10.1, 7.0, 0, -13, -11.3, 0])
+sigma2_exp = np.array([0, 7, 14, 14.8, 13.75, 10, 0, -11.3, -13.05])
+
+# Define residuals: we want the yield function to be zero at each experimental point
+def residuals(params, s1, s2):
+    alpha, beta, k = params
+    return yield_func(s1, s2, alpha, beta, k)
+
+# Initial guess for [alpha, beta, k]
+x0 = np.array([-1.0, 1.0, 10.0])
+# Set bounds; here we require k > 0.
+bounds = ([-np.inf, -np.inf, 0.0], [np.inf, np.inf, np.inf])
+
+# Optimize parameters using least squares
+result = least_squares(residuals, x0, args=(sigma1_exp, sigma2_exp), bounds=bounds)
+alpha_opt, beta_opt, k_opt = result.x
+
+print(f"Optimized parameters:")
+print(f"  alpha = {alpha_opt:.4f}")
+print(f"  beta  = {beta_opt:.4f}")
+print(f"  k     = {k_opt:.4f}")
+
+# Plot the fitted yield locus and experimental points
+sigma_range = np.linspace(-20, 20, 400)
+S1, S2 = np.meshgrid(sigma_range, sigma_range)
+Z = yield_func(S1, S2, alpha_opt, beta_opt, k_opt)
+
+plt.figure(figsize=(6,6))
+# Contour for the yield function equal to zero
+plt.contour(S1, S2, Z, levels=[0], colors='blue', linewidths=2)
+# Plot experimental data points
+plt.scatter(sigma1_exp, sigma2_exp, color='red', zorder=5, label='Experimental Data')
+plt.xlabel(r'$\sigma_1$')
+plt.ylabel(r'$\sigma_2$')
+plt.title('Optimized Yield Locus with Experimental Data')
+plt.legend()
+plt.grid(linestyle=':', linewidth=0.5)
+plt.axis('equal')
+plt.show()
