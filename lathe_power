@@ -8,18 +8,18 @@ f = 0.05           # mm/rev
 N = 6000           # rev/min
 sigma_y = 100      # MPa
 D0 = 9.09          # Initial diameter in mm
-n_trials = 20      # Number of tolerance trials
+n_trials = 20      # Number of random tolerance trials
 
-# Generate process length array (mm)
+# Process length array
 length = np.linspace(0, 135.5, 200)
 
-# Nominal target diameters per section (mm)
+# Section target diameters (mm)
 targets = {
-    'sec1': 8.04,    # 0–10.22 mm
-    'sec2': 7.97,    # 10.22–17.22 mm
-    'sec3': 7.02,    # 17.22–111.58 mm (±0.03 mm tolerance)
-    'sec4': 7.85,    # 111.58–124 mm (±0.01 mm tolerance)
-    'sec5': 9.00     # 124–135.5 mm
+    'sec1': 8.04,
+    'sec2': 7.97,
+    'sec3': 7.02,   # ±0.03 mm tolerance
+    'sec4': 7.85,   # ±0.01 mm tolerance
+    'sec5': 9.00
 }
 
 # Section masks
@@ -31,59 +31,71 @@ masks = {
     'sec5': length > 124
 }
 
-# Pre-generate random tolerance deviations
-dev_sec3 = np.random.uniform(-0.03, 0.03, size=n_trials)
-dev_sec4 = np.random.uniform(-0.01, 0.01, size=n_trials)
+# Pre-generate random deviations
+np.random.seed(42)  # for reproducibility
+dev_sec3 = np.random.uniform(-0.03, 0.03, n_trials)
+dev_sec4 = np.random.uniform(-0.01, 0.01, n_trials)
 
-# Prepare figure
-fig, ax = plt.subplots(figsize=(6, 4))
-line, = ax.plot([], [], linewidth=2)
-ax.set_xlabel("Time (s)")
-ax.set_ylabel("Cutting power $P_c$ (W)")
-ax.set_title("Tolerance Trials: Cutting Power vs. Time")
-ax.grid(True)
-
-# Convert length to time (s)
-feed_speed_mm_per_s = f * N / 60
-time_s = length / feed_speed_mm_per_s
-
-# Determine y-limits dynamically
-# Compute Pc for nominal (no dev) to get full range
-def compute_pc(target_d3, target_d4):
-    # Compute section diameters (mean tool diameter)
+# Function to compute cutting power for given deviations
+def compute_pc(dev3, dev4):
     D = np.zeros_like(length)
     a_p = np.zeros_like(length)
     for sec, mask in masks.items():
-        target = targets[sec]
-        if sec == 'sec3':  # apply tolerance
-            target += target_d3
-        if sec == 'sec4':  # apply tolerance
-            target += target_d4
-        D[mask] = (D0 + target) / 2
-        a_p[mask] = (D0 - target) / 2
-    Pc = np.pi * sigma_y * f * a_p * D * N / 1000
-    return Pc
+        tgt = targets[sec]
+        if sec == 'sec3': tgt += dev3
+        if sec == 'sec4': tgt += dev4
+        D[mask] = (D0 + tgt) / 2
+        a_p[mask] = (D0 - tgt) / 2
+    return np.pi * sigma_y * f * a_p * D * N / 1000
 
-# Get y-limits
-all_Pc = np.array([compute_pc(dev_sec3[i], dev_sec4[i]) for i in range(n_trials)])
-ymin, ymax = all_Pc.min(), all_Pc.max()
-ax.set_xlim(0, time_s[-1])
-ax.set_ylim(ymin * 0.9, ymax * 1.1)
+# Precompute all trials
+Pc_trials = [compute_pc(dev_sec3[i], dev_sec4[i]) for i in range(n_trials)]
+feed_speed = f * N / 60  # mm/s
+time_s = length / feed_speed
+t_end = time_s[-1]
 
-# Animation update function
-def init():
-    line.set_data([], [])
-    return line,
+# Determine global max for annotations
+all_max = max(pc.max() for pc in Pc_trials)
+all_min = min(pc.min() for pc in Pc_trials)
 
-def update(frame):
-    Pc = compute_pc(dev_sec3[frame], dev_sec4[frame])
-    line.set_data(time_s, Pc)
-    ax.set_title(f"Trial {frame+1}/{n_trials}")
-    return line,
+# Setup figure
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.set_xlim(0, t_end)
+ax.set_ylim(all_min * 0.9, all_max * 1.2)
+ax.set_xlabel("Time (s)")
+ax.set_ylabel("Cutting power $P_c$ (W)")
+ax.set_title("20 Trials with Dynamic Annotations")
+ax.grid(True)
 
-# Create and display animation
-ani = FuncAnimation(fig, update, frames=n_trials, init_func=init, interval=500, blit=True)
+# Static end-time line
+annotation_line = ax.axvline(t_end, color='gray', linestyle='--', alpha=0)
+
+# Dynamic scatter and texts
+annotation_scatter = ax.scatter([], [], color='C1', s=50, zorder=5)
+annotation_text_power = ax.text(0, 0, '', color='C1', fontsize=8, ha='center')
+annotation_text_end = ax.text(t_end, all_max * 1.1, '', color='gray', fontsize=8, ha='right')
+
+def update(i):
+    Pc = Pc_trials[i]
+    # Plot the i-th trial curve (accumulated)
+    ax.plot(time_s, Pc, color='C0', alpha=0.3)
+    # Compute max point
+    idx_max = np.argmax(Pc)
+    t_max = time_s[idx_max]
+    P_max = Pc[idx_max]
+    # Show end-time line
+    annotation_line.set_alpha(1.0)
+    # Update scatter at max power
+    annotation_scatter.set_offsets([[t_max, P_max]])
+    # Update max power text
+    annotation_text_power.set_text(f'{P_max:.1f} W')
+    annotation_text_power.set_position((t_max, P_max * 1.05))
+    # Update end-time text
+    annotation_text_end.set_text(f'End @ {t_end:.1f}s')
+    return annotation_line, annotation_scatter, annotation_text_power, annotation_text_end
+
+# Create animation
+ani = FuncAnimation(fig, update, frames=n_trials, interval=500, blit=True)
+
+# Display inline
 HTML(ani.to_jshtml())
-#ani.save('tolerance_trials.mp4', writer='ffmpeg', fps=2)
-from google.colab import files
-files.download('tolerance_trials.mp4')   # 또는 'tolerance_trials.gif'
