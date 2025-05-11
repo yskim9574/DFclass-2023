@@ -1,0 +1,16 @@
+from google.colab import files
+from music21 import converter
+
+#abc 파일을 선택.
+uploaded = files.upload()  
+
+# 업로드된 파일 이름을 확인하고 그대로 parse
+fname = list(uploaded.keys())[0]   # 예: '우리의봄은아직끝나지않았다.abc'
+score = converter.parse(fname)
+
+# 3) MusicXML로 변환해 저장
+score.write('musicxml', fp='our_spring.xml')
+!ls /content 
+
+from google.colab import files
+files.download('our_spring.xml')
