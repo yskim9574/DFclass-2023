@@ -1,0 +1,89 @@
+import math
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import bisect
+
+# 1) Kim–Tuan hardening law parameters and functions
+def sigma_eq(eps_eq):
+    return 162.94 + 432.74 * (0.002 + eps_eq)**0.590 * (1 - np.exp(-492.69 * eps_eq))
+
+def H_prime(eps_eq):
+    A, eps0, n, B = 432.74, 0.002, 0.590, 492.69
+    term1 = (eps0 + eps_eq)**n
+    term2 = 1 - np.exp(-B * eps_eq)
+    dterm1 = n * (eps0 + eps_eq)**(n - 1)
+    dterm2 = B * np.exp(-B * eps_eq)
+    return A * (dterm1 * term2 + term1 * dterm2)
+
+# 2) Hill48 anisotropy functions
+R0, R90 = 2.5, 0.8
+G = 1.0 / (1 + R0)
+Hpar = R0 / (1 + R0)
+F = (R0 / R90) * G
+
+def f_alpha(alpha):
+    return 1.0 / np.sqrt(F*alpha**2 + G + Hpar*(1-alpha)**2)
+
+def df_dalpha(alpha):
+    Q = F*alpha**2 + G + Hpar*(1-alpha)**2
+    dQdA = 2*F*alpha - 2*Hpar*(1-alpha)
+    return -0.5 * Q**(-1.5) * dQdA
+
+def alpha_from_beta(beta):
+    return (beta*(G+Hpar) + Hpar) / (beta*Hpar + F + Hpar)
+
+def dbeta_dalpha(alpha):
+    num = (F+Hpar)*(G+Hpar-Hpar*alpha) - (alpha*(F+Hpar)-Hpar)*(-Hpar)
+    den = (G+Hpar-Hpar*alpha)**2
+    return num/den
+
+def g_val(alpha, beta):
+    return (1 + alpha*beta) / f_alpha(alpha)
+
+# 3) Residual based on Hora–Tong criterion (eq. 17)
+def resid_eq(eps_eq, beta):
+    if eps_eq <= 0: return None
+    alpha = alpha_from_beta(beta)
+    f = f_alpha(alpha)
+    f_p = df_dalpha(alpha)
+    b_p = dbeta_dalpha(alpha)
+    g  = g_val(alpha, beta)
+
+    H_bar = sigma_eq(eps_eq)
+    H_p   = H_prime(eps_eq)
+
+    term    = (-f_p / f**2) * (1.0 / b_p) * (beta * g / eps_eq)
+    bracket = 1.0/f - term   # '-' 적용 (양쪽 모두 동일)
+    RHS     = (f / g) * bracket * H_bar
+
+    return H_p - RHS
+
+# 4) Compute FLC points
+beta_vals = np.linspace(-0.5, 0.6, 111)
+fld_pts = []
+for beta in beta_vals:
+    try:
+        eps_eq_c = bisect(lambda e: resid_eq(e, beta), 1e-6, 5.0, xtol=1e-6)
+    except ValueError:
+        continue
+    alpha = alpha_from_beta(beta)
+    g     = g_val(alpha, beta)
+    eps1  = eps_eq_c / g
+    eps2  = beta * eps1
+    fld_pts.append((eps2, eps1))
+
+fld = np.array(fld_pts)
+
+# 5) Plotting
+plt.figure(figsize=(6,4))
+plt.plot(fld[:,0], fld[:,1], 'k-', linewidth=2, 
+         label='FLC (Kim–Tuan & Hora–Tong)')
+plt.axvline(0, color='gray', linestyle='--')
+plt.xlim(-0.4, 0.6)
+plt.ylim(0, 1.0)
+plt.xlabel('Minor strain ε₂')
+plt.ylabel('Major strain ε₁')
+plt.title('Forming Limit Curve with Kim–Tuan Hardening & Hora–Tong Criterion')
+plt.grid(True)
+plt.legend()
+plt.show()
