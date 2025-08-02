@@ -1,0 +1,290 @@
+import numpy as np
+import math
+import matplotlib.pyplot as plt
+from scipy.optimize import bisect
+
+# ===================================================================
+# 1. 'mat_func' 모듈 대체: Constitutive 클래스 직접 정의
+# ===================================================================
+class Constitutive:
+    """
+    재료의 구성방정식(경화법칙, 항복조건)과 현재 상태를 관리하는 클래스.
+    mat_func.py 파일을 대체합니다.
+    """
+    def __init__(self, label_hrd, params_hrd, label_yld, params_yld):
+        # 재료 모델 정보 저장
+        self.label_hrd = label_hrd
+        self.params_hrd = params_hrd
+        self.label_yld = label_yld
+        self.params_yld = params_yld
+        
+        # 재료 상태 변수 초기화
+        self.reset_mat(beta=0.0)
+
+    def reset_mat(self, beta):
+        """새로운 변형률 경로 계산을 위해 재료 상태를 초기화합니다."""
+        self.eps = 0.0          # 등가 변형률
+        self.pe = np.zeros(3)   # 주 변형률 벡터 [e1, e2, e3]
+        self.sig = 0.0          # 등가 응력
+        self.dsig = 0.0         # 경화율 (d_sig / d_eps)
+        self.beta = beta        # 현재 변형률 경로
+
+    def _swift_hrd(self, eps_eq):
+        """Swift 경화 법칙"""
+        K, eps0, n = self.params_hrd
+        return K * (eps0 + eps_eq)**n
+
+    def _swift_prime(self, eps_eq):
+        """Swift 경화 법칙의 미분 (경화율)"""
+        K, eps0, n = self.params_hrd
+        return K * n * (eps0 + eps_eq)**(n-1)
+
+    def update_hrd(self, eps_eq):
+        """현재 등가 변형률에 맞춰 응력과 경화율을 업데이트합니다."""
+        if self.label_hrd.lower() == 'swift':
+            self.sig = self._swift_hrd(eps_eq)
+            self.dsig = self._swift_prime(eps_eq)
+        else: # 다른 경화식이 추가될 경우
+            self.sig = 0.0
+            self.dsig = 0.0
+    
+    def update_strain(self, dp, dp_vec):
+        """변형률 상태를 업데이트합니다."""
+        self.eps += dp
+        self.pe[0] += dp_vec[0]
+        self.pe[1] += dp_vec[1]
+    
+    def _vm2D(self, sig, para, option):
+        """von Mises 항복 조건 (평면 응력)"""
+        s1, s2 = sig[0], sig[1]
+        # 응력비 alpha (s1=1, s2=alpha)
+        alpha = s2 / s1
+        
+        # 항복 함수 값
+        f = math.sqrt(1 - alpha + alpha**2)
+        
+        # 항복 함수의 미분 값 [df/ds1, df/ds2]
+        dfds1 = (2*s1 - s2) / (2 * s1 * f)
+        dfds2 = (2*s2 - s1) / (2 * s1 * f)
+        
+        return 0, f, [dfds1, dfds2, 0]
+
+    def _Hill48_2D(self, sig, para, option):
+        """Hill48 항복 조건 (평면 응력)"""
+        s1, s2 = sig[0], sig[1]
+        F, G, H = para['F'], para['G'], para['H']
+        
+        # 항복 함수 값
+        f = math.sqrt(G*s1**2 + F*s2**2 + H*(s1-s2)**2)
+        
+        # 항복 함수의 미분 값 [df/ds1, df/ds2]
+        dfds1 = (G*s1 - H*(s2-s1)) / f
+        dfds2 = (F*s2 + H*(s2-s1)) / f
+        
+        return 0, f, [dfds1, dfds2, 0]
+
+    def f_yld(self, sig, option):
+        """저장된 항복 조건에 따라 항복 함수를 계산합니다."""
+        if self.label_yld.lower() == 'hill48':
+            return self._Hill48_2D(sig, self.params_yld, option)
+        elif self.label_yld.lower() == 'vm':
+            return self._vm2D(sig, self.params_yld, option)
+        else:
+            # 기본값으로 von Mises 사용
+            return self._vm2D(sig, self.params_yld, option)
+
+# ===================================================================
+
+def beta2alpha(func_name, para, beta):
+    if func_name=='Hill48' or func_name=='hill48':
+        func = Constitutive(None,None,'Hill48',para).f_yld
+    else:
+        func = Constitutive(None,None,'vm',None).f_yld
+
+    tol = 1e-8
+    ll = -1.0
+    rr = 1.5
+    sleft = [1, ll, 0]
+    sright = [1, rr, 0]
+    dummy, f1, df1 = func(sleft, 0)
+    dummy, f2, df2 = func(sright, 0)
+    b1 = df1[1]/df1[0]
+    b2 = df2[1]/df2[0]
+    
+    # 이분법 시작 전, beta가 계산 가능한 범위 내에 있는지 확인
+    if not (min(b1,b2) < beta < max(b1,b2)):
+        #print(f"경고: beta={beta}가 계산 가능한 범위를 벗어납니다.")
+        if abs(beta-b1) < abs(beta-b2): return ll
+        else: return rr
+
+    while rr-ll>tol:
+        alp = (ll+rr)/2
+        sa = [1, alp, 0]
+        dummy, fa, dfa = func(sa, 0)
+        ba = dfa[1]/dfa[0]
+        if ba > beta:
+            rr = alp
+        elif ba < beta:
+            ll = alp
+        else:
+            break
+    alp = (ll+rr)/2
+    return alp
+    
+def MMFC(delp, dalp, N_ita, N_path, mat):
+    print(f"\n--- MMFC 시작: {mat.label_hrd}, {mat.label_yld} ---")
+    Eps_max = 1.5
+    e1 = [] 
+    e2 = []
+    FLC = []
+    bbb = np.linspace(-0.5,1,N_path)
+    for jj in range(N_path):
+        b0 = bbb[jj]
+        #print('beta0: ', b0)
+        b1 = b0
+        mat.reset_mat(beta = b1)
+        if b1 != 0.0: sgn0 = np.sign(b1)
+        else: sgn0 = 1
+        dfn = 0
+        idx = 0
+        while (mat.eps < Eps_max) and (idx < N_ita):
+            a1 = beta2alpha(mat.label_yld, mat.params_yld, b1)
+            sig = [1, a1, 0]
+            sig1 = [1, a1 + dalp, 0]
+            sdumy, f, dfds = mat.f_yld(sig, 0)
+            sdumy, fd, dfdsd = mat.f_yld(sig1, 0)
+            b1 = dfds[1] / dfds[0]
+            b1d = dfdsd[1] / dfdsd[0]
+            dbda = -(b1 - b1d) / dalp
+            df = -(f - fd) / dalp
+            g = (1 + a1 * b1) / f
+            dp = delp
+            dp1 = dp / g
+            dp2 = b1 * dp1
+            mat.update_strain(dp, [dp1,dp2,0])
+            mat.update_hrd(mat.eps)
+            H, dH = mat.sig, mat.dsig
+            s1 = H / f
+            dfde = g * dH / f
+            if dfde >= s1 or abs(dbda) < 1e-9:
+                db1 = 0
+            else:
+                if dfn < 1: dfn = idx
+                db1 =  (g*dH/H -1)*(f/df)*dbda * dp1
+            b1 += db1
+            if b1 != 0.0: sgn = np.sign(b1)
+            else: sgn = 1.0
+            if abs(sgn - sgn0) > 0:
+                e1.append(mat.pe[0])
+                e2.append(mat.pe[1])
+                break
+            idx += 1
+    return e1, e2
+    
+def MMFC2(delp, dalp, N_ita, N_path, mat, sc):
+    print(f"\n--- MMFC2 시작: {mat.label_hrd}, {mat.label_yld} ---")
+    Eps_max = 1.0        
+    pp = 6
+    e1 = [] 
+    e2 = []
+    bbb = np.linspace(-0.5,1,N_path)
+    for jj in range(N_path):
+        b0 = bbb[jj]
+        #print('beta0: ', b0)
+        if abs(b0) < 0.005: delp = 0.1 * delp
+        b1 = b0
+        mat.reset_mat(beta = b1)
+        peak = 0
+        dfn = 0
+        neck = 0
+        idx = 0
+        min_r2b, max_r2b = 10, -10
+        re = np.zeros(N_ita)
+        re1 = np.zeros(N_ita)
+        re2 = np.zeros(N_ita)
+        rb = np.zeros(N_ita)
+        rdb = np.zeros(N_ita)
+        r2b = np.zeros(N_ita)
+        while (mat.eps < Eps_max) and (idx < N_ita):
+            a1 = beta2alpha(mat.label_yld, mat.params_yld, b1)
+            sig = [1, a1, 0]
+            sig1 = [1, a1 + dalp, 0]
+            sdumy, f, dfds = mat.f_yld(sig, 0)
+            sdumy, fd, dfdsd = mat.f_yld(sig1, 0)
+            b1 = dfds[1] / dfds[0]
+            b1d = dfdsd[1] / dfdsd[0]
+            dbda = -(b1 - b1d) / dalp
+            df = -(f - fd) / dalp
+            g = (1 + a1 * b1) / f
+            dp = delp
+            dp1 = dp / g
+            dp2 = b1 * dp1
+            mat.update_strain(dp, [dp1,dp2,0])
+            mat.update_hrd(mat.eps)
+            H, dH = mat.sig, mat.dsig
+            s1 = H / f
+            dfde = g * dH / f
+            dsdb = -df * H / f**2 / dbda if abs(dbda) > 1e-9 else 0.0
+            if dfde >= s1 or dsdb == 0.0:
+                db1 = 0.0
+            else:
+                if dfn < 1: dfn = idx
+                db1 = sc * (s1 -dfde)/dsdb * dp1
+            b1 += db1
+            re[idx], re1[idx], re2[idx] = mat.eps, mat.pe[0], mat.pe[1]
+            rb[idx], rdb[idx] = b1, db1
+            if dfn > 0 and idx > 2*pp:
+                fit1order = np.polyfit(re[idx-2*pp : idx], rdb[idx-2*pp : idx],1)
+                r2b[idx-pp] = abs(fit1order[0])
+                if peak == 0:
+                    if max_r2b > r2b[idx-pp]: peak = idx-pp
+                    else: max_r2b = r2b[idx-pp]
+                else:
+                    if min_r2b < r2b[idx-pp]:
+                        if neck ==0: neck = idx - pp
+                    else: min_r2b = r2b[idx-pp]
+                if (neck > 0) and (r2b[neck]*1.01 < r2b[idx-pp]):
+                    for ii in range(neck, idx-pp):
+                        if abs(r2b[ii]) < abs(r2b[neck]): neck = ii
+                    e1.append(re1[neck])
+                    e2.append(re2[neck])
+                    break
+            idx = idx + 1
+    return e1, e2
+   
+if __name__ == "__main__":
+    hrd_label = 'Swift'
+    hrd_params = [300.0, 0.003, 0.15]
+    yld_label = 'vm' 
+    yld_params = None
+    
+    mat = Constitutive(label_hrd=hrd_label, params_hrd=hrd_params, label_yld=yld_label, params_yld=yld_params)
+    
+    delta_p = 0.001
+    delta_alp = 1e-5
+    N_ita = 1500
+    N_path = 11
+    
+    fig, axs = plt.subplots()
+    
+    # MMFC 계산 및 플로팅
+    e1_values, e2_values = MMFC(delp=delta_p,dalp=delta_alp, N_ita=1500, N_path=N_path, mat=mat)
+    plt.plot(e2_values, e1_values, '-o', label='MMFC')
+    
+    # MMFC2 계산 및 플로팅
+    MMFC2_e1_values, MMFC2_e2_values = MMFC2(delp=delta_p,dalp=delta_alp, N_ita=1500, N_path=N_path, mat=mat, sc=0.5)
+    plt.plot(MMFC2_e2_values, MMFC2_e1_values, '-s', label='MMFC2')
+
+    # ===================================================================
+    # 2. 그래프 축 범위 설정
+    # ===================================================================
+    plt.xlim(-0.4, 0.6)
+    plt.ylim(0, 1.0)
+    # ===================================================================
+    
+    plt.xlabel("Minor Strain, ε₂")
+    plt.ylabel("Major Strain, ε₁")
+    plt.title("Forming Limit Curve Prediction")
+    plt.grid(True)
+    plt.legend()
+    plt.show()
