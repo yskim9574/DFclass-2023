@@ -1,0 +1,120 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import least_squares
+
+# === 1. 실험 데이터: 실제 엑셀/CSV에서 불러와서 아래 변수들에 대입하세요 ===
+# 예시: Treloar 데이터 (여기에 본인 데이터를 정확히 넣어야 함)
+lam_uni = np.array([1.1338,1.2675,1.3567,1.6242,1.6917,2.1592,2.4269,3.051,3.566,4.0318,
+                    4.7896,5.3694,5.8153,6.172,6.4395,6.707,6.9299,7.0637,7.1975,7.3312,
+                    7.465,7.5541,7.6433])
+stress_uni = np.array([0.158224,0.248643,0.316459,0.42948,0.5425,0.610306,0.700724,0.904163,
+                       1.06499,1.265827,1.650092,2.034357,2.3902,2.802898,3.164561,3.526224,
+                       3.91049,4.294755,4.656416,5.040684,5.424959,5.808224,6.555102])
+
+lam_ps = np.array([1.04,1.13,1.2,1.32,1.44,1.85,2.38,2.97,3.48,3.97,4.36,4.69,4.94])
+stress_ps = np.array([0.070406,0.176531,0.266327,0.352041,0.436735,0.620408,0.8,0.978571,
+                      1.167347,1.337755,1.530612,1.697959,1.884694])
+
+lam_bi = np.array([1.14,1.2,1.31,1.42,1.68,1.94,2.49,3.03,3.43,3.75,4.07,4.26,4.45])
+stress_bi = np.array([0.255102,0.35,0.409184,0.496939,0.670408,0.785714,1.018367,1.281633,
+                      1.507143,1.781633,2.05102,2.285714,2.536735])
+
+# === 2. Ogden-only 모델 정의 (incompressible) ===
+def principal_stretches(mode, lam):
+    if mode == "uniaxial":
+        l1 = lam; l2 = l3 = lam ** (-0.5)
+    elif mode == "pure_shear":
+        l1 = lam; l2 = 1.0; l3 = 1.0 / lam
+    elif mode == "biaxial":
+        l1 = l2 = lam; l3 = lam ** (-2.0)
+    else:
+        raise ValueError("Unknown mode")
+    return l1, l2, l3
+
+def nominal_stress_ogden(mode, lam, mu, alpha):
+    # W = sum(mu_i / alpha_i * (l1^{alpha_i}+l2^{alpha_i}+l3^{alpha_i}-3))
+    l1, l2, l3 = principal_stretches(mode, lam)
+    # partial derivatives dW/dl_i = sum(mu_p * l_i^{alpha_p - 1})
+    dW1 = sum(mu[p] * l1 ** (alpha[p] - 1) for p in range(3))
+    dW2 = sum(mu[p] * l2 ** (alpha[p] - 1) for p in range(3))
+    dW3 = sum(mu[p] * l3 ** (alpha[p] - 1) for p in range(3))
+    if mode == "uniaxial":
+        p = l2 * dW2
+        P = dW1 - p / l1
+    elif mode == "biaxial":
+        p = l3 * dW3
+        P = dW1 - p / l1
+    elif mode == "pure_shear":
+        p = dW2
+        P = dW1 - p / l1
+    return P
+
+# === 3. 잔차 함수: uniaxial + pure shear + biaxial 동시에 ===
+def residuals_ogden_only(x):
+    # x = [mu1, mu2, mu3, alpha1, alpha2, alpha3]
+    mu = np.array(x[0:3])
+    alpha = np.array(x[3:6])
+    res = []
+    for lam, s in zip(lam_uni, stress_uni):
+        res.append(nominal_stress_ogden("uniaxial", lam, mu, alpha) - s)
+    for lam, s in zip(lam_ps, stress_ps):
+        res.append(nominal_stress_ogden("pure_shear", lam, mu, alpha) - s)
+    for lam, s in zip(lam_bi, stress_bi):
+        res.append(nominal_stress_ogden("biaxial", lam, mu, alpha) - s)
+    return np.array(res)
+
+# === 4. 초기값 / 경계 ===
+# 초기 추정: mu_i ~ O(1), alpha_i reasonable positive/negative
+x0 = np.array([1.0, 0.1, 0.1, 1.5, 5.0, -2.0])  # [mu1, mu2, mu3, alpha1, alpha2, alpha3]
+# bounds: allow alpha negative or positive, but avoid zero to prevent singular
+lower = [-10, -10, -10, 0.1, 0.1, -10]
+upper = [10, 10, 10, 20, 20, 10]
+
+# === 5. 피팅 ===
+res = least_squares(residuals_ogden_only, x0, bounds=(lower, upper), verbose=2)
+
+mu_fit = res.x[0:3]
+alpha_fit = res.x[3:6]
+print("Fitted Ogden-only parameters:")
+print("mu =", mu_fit)
+print("alpha =", alpha_fit)
+
+# === 6. 예측 및 R^2 계산 ===
+def R2(y, yhat):
+    ssr = np.sum((y - yhat) ** 2)
+    sst = np.sum((y - np.mean(y)) ** 2)
+    return 1 - ssr / sst
+
+pred_uni = np.array([nominal_stress_ogden("uniaxial", l, mu_fit, alpha_fit) for l in lam_uni])
+pred_ps = np.array([nominal_stress_ogden("pure_shear", l, mu_fit, alpha_fit) for l in lam_ps])
+pred_bi = np.array([nominal_stress_ogden("biaxial", l, mu_fit, alpha_fit) for l in lam_bi])
+
+R2_uni = R2(stress_uni, pred_uni)
+R2_ps = R2(stress_ps, pred_ps)
+R2_bi = R2(stress_bi, pred_bi)
+print(f"R2 uniaxial: {R2_uni:.4f}, pure shear: {R2_ps:.4f}, biaxial: {R2_bi:.4f}")
+
+# === 7. 플롯: 각각 따로, 축 0~8 ===
+modes = [
+    ("Uniaxial", lam_uni, stress_uni, pred_uni, R2_uni),
+    ("Pure Shear", lam_ps, stress_ps, pred_ps, R2_ps),
+    ("Equi-biaxial", lam_bi, stress_bi, pred_bi, R2_bi),
+]
+fig, axs = plt.subplots(1, 3, figsize=(16, 5), sharey=True)
+for ax, (title, lam_arr, y_exp, y_fit, r2val) in zip(axs, modes):
+    ax.plot(lam_arr, y_exp, 'o', mfc='none', mec='black', label="Experiment")
+    ax.plot(lam_arr, y_fit, '-', label="Ogden-only fit", linewidth=2)
+    ax.set_title(f"{title}\n$R^2$={r2val:.4f}")
+    ax.set_xlim(0, 8)
+    ax.set_ylim(0, 8)
+    ax.set_xlabel("Stretch λ")
+    if title == "Uniaxial":
+        ax.set_ylabel("Nominal stress")
+        param_txt = f"μ=[{mu_fit[0]:.3g},{mu_fit[1]:.3g},{mu_fit[2]:.3g}]\n" + \
+                    f"α=[{alpha_fit[0]:.3g},{alpha_fit[1]:.3g},{alpha_fit[2]:.3g}]"
+        ax.text(0.05, 0.95, param_txt, transform=ax.transAxes, va='top', fontsize=8,
+                bbox=dict(facecolor='white', alpha=0.8))
+    ax.grid(True)
+    ax.legend(fontsize=8)
+plt.tight_layout()
+plt.show()
