@@ -1,0 +1,94 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 실험 데이터 (앞에서 얻은 Treloar 값)
+lam_uni = np.array([1.1338,1.2675,1.3567,1.6242,1.6917,2.1592,2.4269,3.051,3.566,4.0318,
+                    4.7896,5.3694,5.8153,6.172,6.4395,6.707,6.9299,7.0637,7.1975,7.3312,
+                    7.465,7.5541,7.6433])
+stress_uni = np.array([0.158224,0.248643,0.316459,0.42948,0.5425,0.610306,0.700724,0.904163,
+                       1.06499,1.265827,1.650092,2.034357,2.3902,2.802898,3.164561,3.526224,
+                       3.91049,4.294755,4.656416,5.040684,5.424959,5.808224,6.555102])
+
+lam_ps = np.array([1.04,1.13,1.2,1.32,1.44,1.85,2.38,2.97,3.48,3.97,4.36,4.69,4.94])
+stress_ps = np.array([0.070406,0.176531,0.266327,0.352041,0.436735,0.620408,0.8,0.978571,
+                      1.167347,1.337755,1.530612,1.697959,1.884694])
+lam_bi = np.array([1.14,1.2,1.31,1.42,1.68,1.94,2.49,3.03,3.43,3.75,4.07,4.26,4.45])
+stress_bi = np.array([0.255102,0.35,0.409184,0.496939,0.670408,0.785714,1.018367,1.281633,
+                      1.507143,1.781633,2.05102,2.285714,2.536735])
+
+# 공동 피팅 결과 파라미터 (이전 계산에서 얻은 값)
+A1_fit = 5.389
+A2_fit = 2.423
+mu_fit = np.array([-5.0, 1.01e-7, 2.4274])
+alpha_fit = np.array([2.0047, 9.5641, -1.9980])
+
+def principal_stretches(mode, lam):
+    if mode=="uniaxial":
+        l1=lam; l2=l3=lam**(-0.5)
+    elif mode=="pure_shear":
+        l1=lam; l2=1.0; l3=1.0/lam
+    elif mode=="biaxial":
+        l1=l2=lam; l3=lam**(-2.0)
+    return l1,l2,l3
+
+def W_and_derivs(l1,l2,l3,A1,A2,mu,alpha):
+    dW1= A1*l1 + A2*l1*(l2**2 + l3**2)
+    dW2= A1*l2 + A2*l2*(l3**2 + l1**2)
+    dW3= A1*l3 + A2*l3*(l1**2 + l2**2)
+    for p in range(3):
+        dW1 += mu[p]*l1**(alpha[p]-1)
+        dW2 += mu[p]*l2**(alpha[p]-1)
+        dW3 += mu[p]*l3**(alpha[p]-1)
+    return dW1,dW2,dW3
+
+def nominal_stress(mode, lam, A1,A2,mu,alpha):
+    l1,l2,l3=principal_stretches(mode, lam)
+    dW1,dW2,dW3=W_and_derivs(l1,l2,l3,A1,A2,mu,alpha)
+    if mode=="uniaxial":
+        p=l2*dW2; P=dW1 - p / l1
+    elif mode=="biaxial":
+        p=l3*dW3; P=dW1 - p / l1
+    elif mode=="pure_shear":
+        p=dW2; P=dW1 - p / l1
+    return P
+
+def r2(y,yhat):
+    ssr=np.sum((y-yhat)**2); sst=np.sum((y-np.mean(y))**2)
+    return 1 - ssr/sst
+
+# 예측
+pred_uni = np.array([nominal_stress("uniaxial", l, A1_fit, A2_fit, mu_fit, alpha_fit) for l in lam_uni])
+pred_ps = np.array([nominal_stress("pure_shear", l, A1_fit, A2_fit, mu_fit, alpha_fit) for l in lam_ps])
+pred_bi = np.array([nominal_stress("biaxial", l, A1_fit, A2_fit, mu_fit, alpha_fit) for l in lam_bi])
+
+R2_uni = r2(stress_uni, pred_uni)
+R2_ps = r2(stress_ps, pred_ps)
+R2_bi = r2(stress_bi, pred_bi)
+
+# 그리기
+fig, axs = plt.subplots(1,3, figsize=(16,5), sharey=True)
+for ax, mode, lam, stress, pred, title, R2 in zip(
+    axs,
+    ["uniaxial","pure_shear","biaxial"],
+    [lam_uni, lam_ps, lam_bi],
+    [stress_uni, stress_ps, stress_bi],
+    [pred_uni, pred_ps, pred_bi],
+    ["Uniaxial Tension","Pure Shear","Equi-biaxial Tension"],
+    [R2_uni, R2_ps, R2_bi],
+):
+    ax.plot(lam, stress, 'o', mfc='none', mec='black', label="Experiment")
+    ax.plot(lam, pred, '-', label="Fit", linewidth=2)
+    ax.set_title(f"{title}\n$R^2$={R2:.4f}")
+    ax.set_xlim(0,8)
+    ax.set_ylim(0,8)
+    ax.set_xlabel("Stretch λ")
+    if mode=="uniaxial":
+        ax.set_ylabel("Nominal Stress")
+        param_txt = f"A1={A1_fit:.3g}\nA2={A2_fit:.3g}\nμ=[{mu_fit[0]:.3g},{mu_fit[1]:.3g},{mu_fit[2]:.3g}]\n" + \
+                    f"α=[{alpha_fit[0]:.3g},{alpha_fit[1]:.3g},{alpha_fit[2]:.3g}]"
+        ax.text(0.05,0.95,param_txt, transform=ax.transAxes, va='top', fontsize=8,
+                bbox=dict(facecolor='white', alpha=0.8, boxstyle='round'))
+    ax.legend(fontsize=8)
+    ax.grid(True)
+plt.tight_layout()
+plt.show()
