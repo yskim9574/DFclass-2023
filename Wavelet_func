@@ -1,0 +1,33 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import pywt
+
+discrete_wavelets = ['db1', 'db4', 'sym5', 'coif1']
+continuous_wavelets = ['morl', 'gaus1', 'mexh', 'cmor1.5-1.0']
+
+fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(14,6))
+axes = axes.reshape(2,4)
+
+# 1) 이산 웨이블릿: wavefun(level=...) -> (phi, psi, x)
+for col, name in enumerate(discrete_wavelets):
+    w = pywt.Wavelet(name)
+    phi, psi, x = w.wavefun(level=5)  # level은 해상도 조절
+    ax = axes[0, col]
+    ax.plot(x, psi)
+    ax.set_title(f"Discrete: {name}")
+    ax.grid(True, alpha=0.3)
+
+# 2) 연속 웨이블릿: ContinuousWavelet.wavefun(length=...)
+for col, name in enumerate(continuous_wavelets):
+    w = pywt.ContinuousWavelet(name)
+    psi, x = w.wavefun(length=1024)
+    ax = axes[1, col]
+    ax.plot(x, np.real(psi), label='real')
+    if np.iscomplexobj(psi):
+        ax.plot(x, np.imag(psi), '--', label='imag')
+        ax.legend()
+    ax.set_title(f"Continuous: {name}")
+    ax.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
