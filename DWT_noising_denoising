@@ -1,0 +1,43 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import pywt
+# Generate a simple sinusoidal signal
+t = np.linspace(0, 1, 1000, endpoint=False)
+clean_signal = np.sin(2.0 * np.pi * 10 * t)
+
+# Add random noise
+noise = np.random.normal(0, 0.5, clean_signal.shape)
+noisy_signal = clean_signal + noise
+
+# Plotting the clean and noisy signals
+plt.figure(figsize=(12, 4))
+plt.subplot(1, 2, 1)
+plt.plot(t, clean_signal)
+plt.title("Clean Signal")
+plt.subplot(1, 2, 2)
+plt.plot(t, noisy_signal)
+plt.title("Noisy Signal")
+plt.tight_layout()
+plt.show()
+
+
+# Perform a multi-level wavelet decomposition
+coeffs = pywt.wavedec(noisy_signal, 'db1', level=4)
+
+# Set a threshold to nullify smaller coefficients (assumed to be noise)
+threshold = 0.5
+coeffs_thresholded = [pywt.threshold(c, threshold, mode='soft') for c in coeffs]
+
+# Reconstruct the signal from the thresholded coefficients
+denoised_signal = pywt.waverec(coeffs_thresholded, 'db1')
+
+# Plotting the noisy and denoised signals
+plt.figure(figsize=(12, 4))
+plt.subplot(1, 2, 1)
+plt.plot(t, noisy_signal)
+plt.title("Noisy Signal")
+plt.subplot(1, 2, 2)
+plt.plot(t, denoised_signal)
+plt.title("Denoised Signal")
+plt.tight_layout()
+plt.show()
