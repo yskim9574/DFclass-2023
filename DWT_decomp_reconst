@@ -1,0 +1,97 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import pywt
+
+# --------------------------------------------------------------------------
+# 1. 입력 신호 생성 
+# --------------------------------------------------------------------------
+sampling_rate = 1000
+t = np.arange(0, 1.0, 1/sampling_rate)
+f1 = 5  # 저주파 성분
+f2 = 50 # 고주파 버스트
+signal = np.sin(2 * np.pi * f1 * t)
+burst_indices = np.where((t >= 0.45) & (t <= 0.55))
+signal[burst_indices] += np.sin(2 * np.pi * f2 * t[burst_indices])
+
+
+# --------------------------------------------------------------------------
+# 2. 다중 레벨 분해 (Multi-level Decomposition)
+# --------------------------------------------------------------------------
+wavelet = 'sym4'
+level = 3
+# wavedec 함수는 최종 근사 계수와 모든 레벨의 세부 계수를 반환
+# coeffs = [cA3, cD3, cD2, cD1]
+coeffs = pywt.wavedec(signal, wavelet, level=level)
+cA3, cD3, cD2, cD1 = coeffs
+
+# 중간 근사 계수(cA1, cA2)를 시각화를 위해 별도로 재구성하여 생성
+# cA2는 cA3와 cD3를 합쳐서 복원
+cA2 = pywt.waverec([cA3, cD3], wavelet)
+# cA1은 복원된 cA2와 cD2를 합쳐서 복원
+cA1 = pywt.waverec([cA2, cD2], wavelet)
+
+
+# --------------------------------------------------------------------------
+# 3. 신호 재구성 (Signal Reconstruction)
+# --------------------------------------------------------------------------
+# 분해된 모든 계수 [cA3, cD3, cD2, cD1]를 사용하여 원본 신호 복원
+reconstructed_signal = pywt.waverec(coeffs, wavelet)
+
+# DWT 경계 처리 방식에 따라 발생할 수 있는 길이 차이를 보정
+min_len = min(len(signal), len(reconstructed_signal))
+signal = signal[:min_len]
+reconstructed_signal = reconstructed_signal[:min_len]
+
+
+# --------------------------------------------------------------------------
+# 4. 전체 결과 시각화
+# --------------------------------------------------------------------------
+# 총 9개의 그래프를 그릴 Figure 생성
+fig, axs = plt.subplots(9, 1, figsize=(12, 20), constrained_layout=True)
+fig.suptitle('DWT Multi-level Decomposition and Reconstruction using Sym4 Wavelet', fontsize=16)
+
+# Plot 1: 원본 신호
+axs[0].plot(t, signal, 'k')
+axs[0].set_title('1. Original Signal')
+axs[0].set_ylabel('Amplitude')
+
+# Plot 2-4: 세부 계수들 (고주파 -> 저주파 순)
+axs[1].plot(cD1, 'g')
+axs[1].set_title('2. Detail Coeffs (cD1) - High Frequency')
+axs[1].set_ylabel('Amplitude')
+
+axs[2].plot(cD2, 'g')
+axs[2].set_title('3. Detail Coeffs (cD2) - Mid-High Frequency')
+axs[2].set_ylabel('Amplitude')
+
+axs[3].plot(cD3, 'g')
+axs[3].set_title('4. Detail Coeffs (cD3) - Mid-Low Frequency')
+axs[3].set_ylabel('Amplitude')
+
+# Plot 5-7: 근사 계수들 (레벨별로)
+axs[4].plot(cA1, 'r')
+axs[4].set_title('5. Approx. Coeffs (cA1) - Result after Level 1')
+axs[4].set_ylabel('Amplitude')
+
+axs[5].plot(cA2, 'r')
+axs[5].set_title('6. Approx. Coeffs (cA2) - Result after Level 2')
+axs[5].set_ylabel('Amplitude')
+
+axs[6].plot(cA3, 'r')
+axs[6].set_title('7. Approx. Coeffs (cA3) - Final Result after Level 3')
+axs[6].set_ylabel('Amplitude')
+
+# Plot 8: 재구성된 신호
+axs[7].plot(t, reconstructed_signal, 'b')
+axs[7].set_title('8. Reconstructed Signal')
+axs[7].set_ylabel('Amplitude')
+
+# Plot 9: 재구성 오차
+error = signal - reconstructed_signal
+axs[8].plot(t, error, 'purple')
+axs[8].set_title('9. Reconstruction Error (Essentially Zero)')
+axs[8].set_xlabel('Time [s] for Signals / Sample Index for Coefficients')
+axs[8].set_ylabel('Error')
+axs[8].set_ylim([-1e-13, 1e-13]) # 오차가 매우 작음을 보여주기 위해 y축 범위 고정
+
+plt.show()
