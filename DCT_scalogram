@@ -1,0 +1,57 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import pywt
+
+# 1. 복합 입력 신호 정의 (0초 ~ 2초) - 변경 없음
+# -----------------------------------------------------------------------------
+f_base = 5      # 기저 성분의 주파수 (Hz)
+f_burst = 20    # 버스트 성분의 주파수 (Hz)
+t_start_burst = 1.015 # 버스트 시작 시간 (s)
+t_end_burst = 1.38  # 버스트 종료 시간 (s)
+
+sampling_rate = 1000
+t = np.arange(0, 2, 1/sampling_rate)
+
+signal_base = np.sin(2 * np.pi * f_base * t)
+burst_wave = np.sin(2 * np.pi * f_burst * t)
+window = np.zeros_like(t)
+burst_indices = np.where((t >= t_start_burst) & (t <= t_end_burst))
+window[burst_indices] = 1
+signal_burst = burst_wave * window
+x = signal_base + signal_burst
+
+# 2. Morlet 웨이블릿을 사용한 CWT 수행 - 변경 없음
+# -----------------------------------------------------------------------------
+fc = 1
+wavelet = f'cmor1.5-{fc}.0'
+scales = np.arange(1, 512)
+coefficients, frequencies = pywt.cwt(x, scales, wavelet, 1/sampling_rate)
+
+# 3. 결과 시각화
+# -----------------------------------------------------------------------------
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [1, 3]})
+
+# 상단: 원본 신호 플롯 (전체 0~2초)
+ax1.plot(t, x, color='royalblue')
+ax1.set_title('Original Composite Signal (0-2s)')
+ax1.set_xlabel('Time [s]')
+ax1.set_ylabel('Amplitude')
+ax1.grid(True, linestyle='--', alpha=0.6)
+ax1.axvspan(t_start_burst, t_end_burst, color='orange', alpha=0.3, label=f'{f_burst}Hz Burst Region')
+ax1.legend(loc='upper right')
+ax1.set_xlim(0, 2)
+
+# 하단: 스칼로그램 플롯 (전체 0~2초 구간)
+im = ax2.pcolormesh(t, frequencies, np.abs(coefficients), cmap='viridis', shading='auto')
+ax2.set_title(f'Scalogram for the Full 0-2s Range')
+ax2.set_xlabel('Time (b) [s]')
+ax2.set_ylabel('Frequency (f) [Hz]')
+ax2.set_ylim(1, 30)
+
+# ===> 이 부분을 수정했습니다 <===
+# X축 범위를 전체 시간인 0초부터 2초까지로 설정
+ax2.set_xlim(0, 2)
+
+fig.colorbar(im, ax=ax2, label='Magnitude |Wx(a,b)|')
+plt.tight_layout()
+plt.show()
