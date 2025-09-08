@@ -1,0 +1,201 @@
+# 셀 1: Drive 마운트
+from google.colab import drive
+drive.mount('/content/drive')
+
+# BASE_DIR를 사용자의 실제 경로로 바꾸세요 (예: '/content/drive/MyDrive/weld_dataset')
+BASE_DIR = '/content/drive/MyDrive/weld_dataset'
+print("BASE_DIR =", BASE_DIR)
+
+import os, glob
+print("Train safe count:", len(glob.glob(os.path.join(BASE_DIR,'train','safe','*'))))
+print("Train defect count:", len(glob.glob(os.path.join(BASE_DIR,'train','defect','*'))))
+print("Test count:", len(glob.glob(os.path.join(BASE_DIR,'test','*'))))
+
+# 셀 2: train 폴더에서 val(20%) 자동 생성 (존재하면 스킵)
+import os, glob, random, shutil
+random.seed(42)
+
+def ensure_val_split(base_dir, val_ratio=0.2):
+    val_safe = os.path.join(base_dir, 'val', 'safe')
+    val_defect = os.path.join(base_dir, 'val', 'defect')
+    if os.path.exists(val_safe) and os.path.exists(val_defect):
+        print("val folder exists; skipping split.")
+        return
+    train_safe = glob.glob(os.path.join(base_dir, 'train', 'safe', '*'))
+    train_defect = glob.glob(os.path.join(base_dir, 'train', 'defect', '*'))
+    if len(train_safe)==0 or len(train_defect)==0:
+        raise FileNotFoundError("train/safe or train/defect not found or empty. Please check BASE_DIR.")
+    os.makedirs(val_safe, exist_ok=True)
+    os.makedirs(val_defect, exist_ok=True)
+    def split_and_copy(files, out_val_dir):
+        random.shuffle(files)
+        n_val = max(1, int(len(files) * val_ratio))
+        val_files = files[:n_val]
+        for f in val_files:
+            shutil.copy(f, os.path.join(out_val_dir, os.path.basename(f)))
+        return len(val_files)
+    moved_safe = split_and_copy(train_safe, val_safe)
+    moved_defect = split_and_copy(train_defect, val_defect)
+    print(f"Copied {moved_safe} safe images to val/safe and {moved_defect} defect images to val/defect.")
+
+ensure_val_split(BASE_DIR, val_ratio=0.2)
+
+# 셀 3: 데이터 로드, preprocess, 간단 증강
+import tensorflow as tf
+from tensorflow.keras.applications.densenet import preprocess_input
+from tensorflow.keras.preprocessing import image_dataset_from_directory
+import os
+
+IMG_SIZE = 224
+BATCH_SIZE = 8
+TRAIN_DIR = os.path.join(BASE_DIR, 'train')
+VAL_DIR   = os.path.join(BASE_DIR, 'val')
+
+train_ds = image_dataset_from_directory(
+    TRAIN_DIR, labels='inferred', label_mode='binary',
+    image_size=(IMG_SIZE, IMG_SIZE), batch_size=BATCH_SIZE, shuffle=True
+)
+val_ds = image_dataset_from_directory(
+    VAL_DIR, labels='inferred', label_mode='binary',
+    image_size=(IMG_SIZE, IMG_SIZE), batch_size=BATCH_SIZE, shuffle=False
+)
+
+print("Class names (sorted):", train_ds.class_names)
+# class_names will likely be ['defect','safe'] -> defect=0, safe=1
+
+AUTOTUNE = tf.data.AUTOTUNE
+
+def preprocess(image, label, training=False):
+    image = tf.cast(image, tf.float32)
+    image = preprocess_input(image)  # DenseNet preprocessing
+    if training:
+        # on-the-fly augmentation (simple)
+        image = tf.image.random_flip_left_right(image)
+        image = tf.image.random_brightness(image, 0.08)
+        image = tf.image.random_contrast(image, 0.9, 1.1)
+        # optionally use tf.keras.layers.RandomRotation in a tf.keras.Sequential preprocessing layer
+    return image, label
+
+train_ds = train_ds.map(lambda x,y: preprocess(x,y, training=True), num_parallel_calls=AUTOTUNE)
+val_ds   = val_ds.map(lambda x,y: preprocess(x,y, training=False), num_parallel_calls=AUTOTUNE)
+
+train_ds = train_ds.cache().prefetch(AUTOTUNE)
+val_ds   = val_ds.cache().prefetch(AUTOTUNE)
+
+# 셀 4: DenseNet121 (ImageNet) 기반 전이학습 모델 구성
+from tensorflow.keras import layers, models, optimizers, callbacks
+
+base_model = tf.keras.applications.DenseNet121(weights='imagenet', include_top=False,
+                                               input_shape=(IMG_SIZE, IMG_SIZE, 3))
+base_model.trainable = False  # freeze backbone
+
+inputs = layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
+x = base_model(inputs, training=False)
+x = layers.GlobalAveragePooling2D()(x)
+x = layers.Dropout(0.3)(x)
+x = layers.Dense(64, activation='relu')(x)
+x = layers.Dropout(0.2)(x)
+outputs = layers.Dense(1, activation='sigmoid')(x)  # sigmoid -> probability of class 1 (safe)
+
+model = models.Model(inputs, outputs)
+model.compile(optimizer=optimizers.Adam(learning_rate=1e-4),
+              loss='binary_crossentropy',
+              metrics=['accuracy', tf.keras.metrics.Precision(name='precision'), tf.keras.metrics.Recall(name='recall')])
+
+model.summary()
+
+# 셀 5: class weight 계산 (train labels이 부족하면 자동 계산이 안전)
+import numpy as np
+# compute class weights from train_ds (iterate once)
+y_train = []
+for _, y in train_ds.unbatch():
+    y_train.append(int(y.numpy()))
+y_train = np.array(y_train)
+from sklearn.utils import class_weight
+if len(y_train)>0:
+    cw = class_weight.compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+    class_weight_dict = {i: cw[i] for i in range(len(cw))}
+    print("class_weight:", class_weight_dict)
+else:
+    class_weight_dict = None
+
+es = callbacks.EarlyStopping(monitor='val_loss', patience=6, restore_best_weights=True)
+rlp = callbacks.ReduceLROnPlateau(monitor='val_loss', patience=3, factor=0.5, verbose=1)
+
+history = model.fit(train_ds, validation_data=val_ds, epochs=30,
+                    callbacks=[es, rlp], class_weight=class_weight_dict)
+
+# 셀 6: fine-tune (optional)
+base_model.trainable = True
+# freeze lower layers, train only top part
+for layer in base_model.layers[:-40]:
+    layer.trainable = False
+
+model.compile(optimizer=optimizers.Adam(learning_rate=1e-5),
+              loss='binary_crossentropy',
+              metrics=['accuracy', tf.keras.metrics.Precision(name='precision'), tf.keras.metrics.Recall(name='recall')])
+
+history_ft = model.fit(train_ds, validation_data=val_ds, epochs=15, callbacks=[es, rlp], class_weight=class_weight_dict)
+
+# 셀 7: 평가 및 confusion matrix
+val_loss, val_acc, val_prec, val_rec = model.evaluate(val_ds)
+print(f"Val loss={val_loss:.4f}, acc={val_acc:.4f}, prec={val_prec:.4f}, rec={val_rec:.4f}")
+
+# confusion matrix on val set
+import numpy as np
+y_true = []
+y_prob = []
+for x_batch, y_batch in val_ds:
+    preds = model.predict(x_batch)
+    y_prob.extend(preds.ravel().tolist())
+    y_true.extend(y_batch.numpy().tolist())
+
+y_pred = (np.array(y_prob) >= 0.5).astype(int)
+from sklearn.metrics import confusion_matrix, classification_report
+cm = confusion_matrix(y_true, y_pred)
+print("Confusion matrix:\n", cm)
+print(classification_report(y_true, y_pred))
+
+# 셀 8: test 폴더의 이미지들에 대해 예측(확률) 및 시각화
+import glob, numpy as np, matplotlib.pyplot as plt
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.applications.densenet import preprocess_input
+
+TEST_DIR = os.path.join(BASE_DIR, 'test')
+test_files = sorted(glob.glob(os.path.join(TEST_DIR, '*')))
+print("Found test files:", len(test_files))
+
+def predict_file(fp):
+    img = image.load_img(fp, target_size=(IMG_SIZE, IMG_SIZE))
+    arr = image.img_to_array(img)
+    arr = preprocess_input(arr)
+    prob_safe = float(model.predict(np.expand_dims(arr,0))[0,0])  # sigmoid -> probability of class 'safe'
+    prob_defect = 1.0 - prob_safe
+    pred_label = 'safe' if prob_safe >= 0.5 else 'defect'
+    return prob_safe, prob_defect, pred_label, img
+
+# visualize
+n = len(test_files)
+if n == 0:
+    print("No test images found in", TEST_DIR)
+else:
+    cols = min(6, n)
+    plt.figure(figsize=(4*cols, 4))
+    for i, fp in enumerate(test_files[:cols]):
+        p_safe, p_def, label, img_pil = predict_file(fp)
+        plt.subplot(1, cols, i+1)
+        plt.imshow(img_pil)
+        plt.title(f"{label}\n safe:{p_safe:.3f}\n defect:{p_def:.3f}")
+        plt.axis('off')
+    plt.show()
+
+# also print text list of probabilities
+print("Test results:")
+for fp in test_files:
+    p_safe, p_def, label, _ = predict_file(fp)
+    print(f"{os.path.basename(fp)} -> pred: {label}, prob_safe={p_safe:.4f}, prob_defect={p_def:.4f}")
+
+# 셀 9: 모델 저장
+OUT_MODEL = os.path.join(BASE_DIR, 'densenet_weld_model.h5')
+model.save(OUT_MODEL)
+print("Saved model to", OUT_MODEL)
