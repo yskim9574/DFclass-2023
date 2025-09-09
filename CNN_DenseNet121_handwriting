@@ -1,0 +1,163 @@
+# =========================
+# DenseNet121 Transfer Learning (NO Dropout)
+# =========================
+import os, math, numpy as np, matplotlib.pyplot as plt
+import tensorflow as tf
+from tensorflow.keras import layers
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.applications.densenet import DenseNet121, preprocess_input
+from PIL import Image
+from google.colab import drive
+
+# 0) Google Drive mount
+drive.mount('/content/drive')
+
+# 1) Paths
+BASE = "/content/drive/MyDrive/handwriting_letter/"
+TRAIN_DIR = os.path.join(BASE, "train")
+TEST_DIR  = os.path.join(BASE, "test")
+
+IMG_SIZE = (224, 224)
+BATCH = 8
+
+# 2) Generators (mild augmentation for train, none for val)
+train_datagen = ImageDataGenerator(
+    preprocessing_function=preprocess_input,
+    validation_split=0.2,         # 내부에서 train/val 분할
+    rotation_range=8,             # 약한 증강
+    width_shift_range=0.08,
+    height_shift_range=0.08,
+    shear_range=0.05,
+    zoom_range=0.08,
+    horizontal_flip=True,         # X 글자는 좌우 반전 허용
+    fill_mode='nearest'
+)
+val_datagen = ImageDataGenerator(
+    preprocessing_function=preprocess_input,
+    validation_split=0.2
+)
+
+train_gen = train_datagen.flow_from_directory(
+    TRAIN_DIR,
+    target_size=IMG_SIZE,
+    color_mode='rgb',
+    class_mode='binary',
+    batch_size=BATCH,
+    shuffle=True,
+    subset='training'
+)
+val_gen = val_datagen.flow_from_directory(
+    TRAIN_DIR,
+    target_size=IMG_SIZE,
+    color_mode='rgb',
+    class_mode='binary',
+    batch_size=BATCH,
+    shuffle=False,
+    subset='validation'
+)
+
+print("Class indices:", train_gen.class_indices)  # 예: {'X': 0, 'non-X': 1} (환경에 따라 달라짐)
+
+# 3) Model (DenseNet121 base -> GAP -> 1 sigmoid)
+base_model = DenseNet121(weights='imagenet', include_top=False, input_shape=(224,224,3))
+base_model.trainable = False  # Phase 1: 고정
+
+inputs = tf.keras.Input(shape=(224,224,3))
+x = base_model(inputs, training=False)
+x = layers.GlobalAveragePooling2D()(x)
+outputs = layers.Dense(1, activation='sigmoid')(x)  # 이진 분류 헤드
+model = tf.keras.Model(inputs, outputs)
+
+model.compile(optimizer=tf.keras.optimizers.Adam(1e-3),
+              loss='binary_crossentropy',
+              metrics=['accuracy'])
+model.summary()
+
+callbacks = [
+    EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1),
+    ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=1e-6, verbose=1)
+]
+
+# 4) Phase 1: Train head only
+history1 = model.fit(
+    train_gen,
+    validation_data=val_gen,
+    epochs=12,
+    callbacks=callbacks,
+    verbose=1
+)
+
+# 5) Phase 2: Fine-tuning (unfreeze top layers of DenseNet)
+#    - 너무 많이 풀면 과적합/불안정 → 상위 60층만 풀어서 미세조정
+base_model.trainable = True
+for layer in base_model.layers[:-60]:
+    layer.trainable = False
+
+model.compile(optimizer=tf.keras.optimizers.Adam(1e-5),  # 낮은 lr로 미세조정
+              loss='binary_crossentropy',
+              metrics=['accuracy'])
+
+history2 = model.fit(
+    train_gen,
+    validation_data=val_gen,
+    epochs=12,
+    callbacks=callbacks,
+    verbose=1
+)
+
+# 6) Test prediction (folder: test/ with 5 files)
+def load_test_image(path):
+    img = Image.open(path).convert('RGB').resize(IMG_SIZE)  # 3ch
+    arr = np.array(img, dtype=np.float32)
+    arr = preprocess_input(arr)  # 학습과 동일 전처리
+    return arr
+
+test_imgs, test_names = [], []
+for i in range(1, 6):
+    p = os.path.join(TEST_DIR, f"test_image_{i}.jpg")
+    if os.path.exists(p):
+        test_imgs.append(load_test_image(p))
+        test_names.append(os.path.basename(p))
+    else:
+        print("Missing:", p)
+if len(test_imgs) == 0:
+    raise SystemExit("No test images found.")
+
+test_arr = np.stack(test_imgs, axis=0)
+
+# Keras binary sigmoid 출력은 "양의 클래스(라벨 1)" 확률
+# 'X'가 양의 클래스인지 확인 후 P(X)로 변환
+pos_label_name = [k for k,v in train_gen.class_indices.items() if v == 1][0]
+probs_pos = model.predict(test_arr).ravel()
+if pos_label_name == 'X':
+    pX = probs_pos
+else:
+    pX = 1.0 - probs_pos
+
+preds = (pX >= 0.5).astype(int)
+
+plt.figure(figsize=(15, 4))
+for i in range(len(test_arr)):
+    plt.subplot(1, len(test_arr), i+1)
+    # 시각화는 원본 회색조로 보고 싶다면 아래 두 줄로 대체:
+    # img = Image.open(os.path.join(TEST_DIR, test_names[i])).convert('L').resize(IMG_SIZE)
+    # plt.imshow(np.array(img), cmap='gray')
+    img_rgb = Image.open(os.path.join(TEST_DIR, test_names[i])).convert('RGB').resize(IMG_SIZE)
+    plt.imshow(img_rgb)
+    name = "X" if preds[i]==1 else "Non-X"
+    plt.title(f"{test_names[i]}\nPred: {name}\nP(X): {pX[i]:.2f}\nP(Non-X): {1-pX[i]:.2f}")
+    plt.axis('off')
+plt.tight_layout(); plt.show()
+
+# 7) (옵션) 학습 곡선
+def plot_hist(h, title_prefix=""):
+    plt.figure(figsize=(12,5))
+    plt.subplot(1,2,1); plt.plot(h.history['loss']); plt.plot(h.history['val_loss'])
+    plt.title(f'{title_prefix} Loss'); plt.legend(['train','val'])
+    plt.subplot(1,2,2); plt.plot(h.history['accuracy']); plt.plot(h.history['val_accuracy'])
+    plt.title(f'{title_prefix} Accuracy'); plt.legend(['train','val'])
+    plt.tight_layout(); plt.show()
+
+plot_hist(history1, "Phase1")
+plot_hist(history2, "Phase2")
