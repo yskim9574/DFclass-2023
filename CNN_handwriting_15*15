@@ -3,118 +3,140 @@ import tensorflow as tf
 from tensorflow.keras import layers, models
 import matplotlib.pyplot as plt
 from PIL import Image
+import os
+from google.colab import drive
 
-# Load your handwritten X and non-X images for training
-X_images = []
-non_X_images = []
-for i in range(1, 12):
-    image_path = f"X_image_{i}.jpg"  # Update with your actual file names for X images
-    img = Image.open(image_path).convert('L')  # Convert to grayscale, L means luminance
-    img = img.resize((15, 15))  # Increase the image resolution
-    X_images.append(np.array(img))
+# -----------------------------
+# 공통 설정
+# -----------------------------
+INPUT_SIZE = (15, 15)   # ← 이미지 해상도 (훈련/테스트/모델 입력 모두 일치)
 
-for i in range(1, 12):
-    image_path = f"non_X_image_{i}.jpg"  # Update with your actual file names for non-X images
-    img = Image.open(image_path).convert('L')  # Convert to grayscale
-    img = img.resize((15, 15))  # Increase the image resolution
-    non_X_images.append(np.array(img))
+# 1. Google Drive 마운트
+drive.mount('/content/drive')
+!ls /content/drive/MyDrive/
 
-# Labels: X -> 1, non-X -> 0
-labels = np.concatenate([np.ones(len(X_images)), np.zeros(len(non_X_images))])
-images = np.array(X_images + non_X_images)
+base_data_path = "/content/drive/MyDrive/handwriting_letter/"
 
-# Shuffle the dataset
+# (선택) test 폴더 확인
+test_dir = os.path.join(base_data_path, "test")
+print(f"Checking if test directory exists: {test_dir}")
+if os.path.exists(test_dir):
+    print(f"Test directory found! Listing contents of: {test_dir}")
+    !ls "{test_dir}"
+else:
+    print(f"Test directory NOT found at: {test_dir}")
+
+# -----------------------------
+# 2) 학습 이미지 로드 (X / non-X)
+# -----------------------------
+def load_gray_resize(path, size):
+    img = Image.open(path).convert('L')
+    img = img.resize(size)
+    return np.array(img, dtype=np.float32) / 255.0  # (H,W) 0~1
+
+X_images, non_X_images = [], []
+
+x_train_dir = os.path.join(base_data_path, "train", "X")
+for i in range(1, 13):
+    p = os.path.join(x_train_dir, f"X_image_{i}.jpg")
+    try:
+        X_images.append(load_gray_resize(p, INPUT_SIZE))
+    except Exception as e:
+        print(f"Warning: skip {p} -> {e}")
+
+non_x_train_dir = os.path.join(base_data_path, "train", "non-X")
+for i in range(1, 13):
+    p = os.path.join(non_x_train_dir, f"non_X_image_{i}.jpg")
+    try:
+        non_X_images.append(load_gray_resize(p, INPUT_SIZE))
+    except Exception as e:
+        print(f"Warning: skip {p} -> {e}")
+
+print(f"Loaded {len(X_images)} X images for training.")
+print(f"Loaded {len(non_X_images)} non-X images for training.")
+
+if not X_images or not non_X_images:
+    raise SystemExit("Error: Not enough images loaded for training. Please check your paths and file counts.")
+
+# 라벨/이미지 배열
+labels = np.concatenate([np.ones(len(X_images)), np.zeros(len(non_X_images))]).astype(np.int64)
+images = np.array(X_images + non_X_images, dtype=np.float32)
+images = np.expand_dims(images, axis=-1)  # (N, H, W, 1)
+
+# 셔플
 indices = np.arange(len(images))
 np.random.shuffle(indices)
-labels = labels[indices]
-images = images[indices]
+images, labels = images[indices], labels[indices]
 
-# Define the model
+# -----------------------------
+# 3) 모델 정의 (입력 크기 15x15x1)
+# -----------------------------
 model = models.Sequential([
-    layers.Conv2D(32, (3, 3), activation='relu', padding='same', input_shape=(15, 15, 1)),
-    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(32, (3, 3), activation='relu', padding='same', input_shape=(INPUT_SIZE[0], INPUT_SIZE[1], 1)),
+    layers.MaxPooling2D((2, 2)),                 # 15->7
     layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
     layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
-    layers.Flatten(),
+    layers.Flatten(),                             # 7*7*64 = 3136
     layers.Dense(64, activation='relu'),
-#    layers.Dense(2, activation='sigmoid')  # Output layer with 2 neurons for binary classification
-    layers.Dense(2, activation='softmax')  # Output layer with 2 neurons for binary classification
+    layers.Dense(2, activation='softmax')
 ])
 
-model.compile(optimizer='adam',
-              loss='sparse_categorical_crossentropy',
-              metrics=['accuracy'])
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+model.summary()
 
+# -----------------------------
+# 4) 학습
+# -----------------------------
+print("\n--- Starting Model Training ---")
+history = model.fit(images, labels, epochs=20, batch_size=4, validation_split=0.2, verbose=1)
 
-# Train the model with your data
-model.fit(images, labels, epochs=10, batch_size=4)
+# -----------------------------
+# 5) 테스트 이미지 로드 & 예측
+# -----------------------------
+test_images, test_image_names = [], []
+for i in range(1, 6):
+    p = os.path.join(base_data_path, "test", f"test_image_{i}.jpg")
+    try:
+        test_images.append(load_gray_resize(p, INPUT_SIZE))
+        test_image_names.append(f"test_image_{i}.jpg")
+    except Exception as e:
+        print(f"Warning: skip test {p} -> {e}")
 
-# Load the new test images
-new_test_images = []
-for i in range(1, 5):  # Update the range to include all four new test images
-    image_path = f"new_test_image_{i}.jpg"  # Update with your actual file names for new test images
-    img = Image.open(image_path).convert('L')  # Convert to grayscale
-    img = img.resize((15, 15))  # Increase the image resolution
-    new_test_images.append(np.array(img))
+print(f"\nLoaded {len(test_images)} test images.")
 
-# Predict whether the new test images are X or non-X letters
-new_test_images = np.array(new_test_images)
-new_test_images = np.expand_dims(new_test_images, axis=-1)
-predictions = model.predict(new_test_images)
+if not test_images:
+    raise SystemExit("Error: No test images loaded. Cannot perform prediction.")
 
-# Evaluate the model on the new test data
-true_labels = np.array([1, 1, 0, 0])  # Actual labels for the new test images (assuming first two are X, last two are non-X)
-loss, accuracy = model.evaluate(new_test_images, true_labels)
-print(f"Loss: {loss}, Accuracy: {accuracy}")
+test_images = np.expand_dims(np.array(test_images, dtype=np.float32), axis=-1)  # (M,H,W,1)
 
-# Getting probabilistic values
-probabilities = model.predict(new_test_images)
+print("\n--- Making Predictions on Test Images ---")
+predictions = model.predict(test_images)
 
-# Get the flattened layer values
-flattened_output = model.layers[-3].output
-flattened_model = tf.keras.Model(inputs=model.input, outputs=flattened_output)
-flattened_features = flattened_model.predict(new_test_images)
-
-print("Flattened Layer Values:", flattened_features.round(3))
-print("Probabilistic Values:", probabilities.round(5))
-
-# Display the new test images with predictions
+# 시각화
 plt.figure(figsize=(10, 5))
-for i in range(len(new_test_images)):
-    plt.subplot(1, 4, i + 1)
-    plt.imshow(new_test_images[i].squeeze(), cmap='gray')  # Show grayscale images
-    predicted_class = "X" if np.argmax(predictions[i]) == 1 else "Non-X"
-    plt.title(f"Predicted: {predicted_class}")
+for i in range(len(test_images)):
+    plt.subplot(1, len(test_images), i + 1)
+    plt.imshow(test_images[i].squeeze(), cmap='gray')
+    pred_idx = int(np.argmax(predictions[i]))
+    pred_name = "X" if pred_idx == 1 else "Non-X"
+    pX, pNonX = float(predictions[i][1]), float(predictions[i][0])
+    plt.title(f"{test_image_names[i]}\nPred: {pred_name}\nP(X): {pX:.2f}\nP(Non-X): {pNonX:.2f}")
     plt.axis('off')
-plt.show()
+plt.tight_layout(); plt.show()
 
-# Train the model with validation split
-history = model.fit(images, labels, epochs=50, batch_size=4, validation_split=0.3)
+print("\nProbabilistic Values for Test Images:")
+for i, prob in enumerate(predictions):
+    print(f"{test_image_names[i]}: X={prob[1]:.4f}, Non-X={prob[0]:.4f}")
 
-# Plot training & validation loss values
-plt.plot(history.history['loss'])
-plt.plot(history.history['val_loss'])
-plt.title('Model Loss')
-plt.ylabel('Loss')
-plt.xlabel('Epoch')
-plt.legend(['Train', 'Validation'], loc='upper left')
-plt.show()
+# 학습 곡선
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 2, 1)
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title('Model Loss'); plt.ylabel('Loss'); plt.xlabel('Epoch'); plt.legend()
 
-# Plot training & validation accuracy values
-plt.plot(history.history['accuracy'])
-plt.plot(history.history['val_accuracy'])
-plt.title('Model Accuracy')
-plt.ylabel('Accuracy')
-plt.xlabel('Epoch')
-plt.legend(['Train', 'Validation'], loc='upper left')
-plt.show()
-
-# Plot training & validation loss values
-plt.plot(history.history['loss'])
-plt.plot(history.history['val_loss'])
-plt.title('Model Loss')
-plt.ylabel('Loss')
-plt.xlabel('Epoch')
-plt.legend(['Train', 'Validation'], loc='upper left')
-plt.show()
-
+plt.subplot(1, 2, 2)
+plt.plot(history.history['accuracy'], label='Train Accuracy')
+plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Model Accuracy'); plt.ylabel('Accuracy'); plt.xlabel('Epoch'); plt.legend()
+plt.tight_layout(); plt.show()
