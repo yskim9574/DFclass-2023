@@ -2,12 +2,17 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Load the dataset
+# Load the dataset, df is data frame
+#head() ; print only 5 data from the top
 df = pd.read_csv('record.csv')
 print(df.head())
+print(df)
 
-# Find rows or column having missing value , NaN or None
-missing_rows = df[df.isnull().any(axis=1)]
+# Find rows or column having missing value , NaN or None, 
+#Na is Not available, NaN is Not a number, isnull is (Is it null?), tolist is (to list the data) 
+#axis=1: column, axis=0: row 
+
+missing_rows = df[df.isnull().any(axis=1)] 
 print(missing_rows)
 
 missing_cols = df.columns[df.isnull().any()].tolist()
@@ -24,21 +29,29 @@ print(df_cleaned_column)
 df['MOT'] = [86, 81, 96, 99, 80, 94]
 df['Factory']=85
 print(df.head())
+
 # Separate and remove a specific column (axis=1) or row (axis=0) from a DataFrame.
 # use X as input data, and y as result
 df_input = df.drop('Toeic', axis=1) 
 df_result = df['Toeic']
-print(round(df_input.mean(),2)) #mean for each column
+print(df_result)
+
+numeric_cols =df_input.select_dtypes(include=np.number)
+print(round(numeric_cols.mean(),2)) #mean for each column
 
 # Calculate the mean of the 'Phy' column (보통 행 단위보다 열 단위 평균을 이용함)
-phy_mean = df_input['Phy'].mean()
-# Replace NaN values with the  mean of the 'Phy' column
-df_input['Phy'].fillna(round(phy_mean,2), inplace=True)
+# Imputation(or Replace) of NaN values with the mean of the 'Phy' column(결측값을 열의 평균값으로 대체)
+phy_mean = round(df_input['Phy'].mean(), 2)
+df_out=df_input.copy()
+df_out['Phy'] = df_out['Phy'].fillna(phy_mean)
+print(phy_mean)
+print(df_out)
 
 # Calculate the mean of all numerical columns
 #numerical_mean = #df_input.select_dtypes(include=[np.number]).mean().mean()
-# Replace NaN values with the overall mean of numerical columns
+# Imputation of NaN values with the overall mean of numerical columns
 #df_input.fillna(round(numerical_mean,2), inplace=True)
 
-print(df_input)
-print(df_result)
+numeric_cols =df_out.select_dtypes(include=np.number)
+print(round(numeric_cols.mean(),2)) #mean for each column
+
