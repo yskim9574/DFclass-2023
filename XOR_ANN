@@ -75,6 +75,8 @@ plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.title('Loss vs. Epoch')
 plt.show()
+print("\nOutput from neural network after 10,000 epochs: ",end='')
+print(*predicted_output)
 
 # Test the model for the input [1, 0]
 test_input = np.array([[1, 0]])
