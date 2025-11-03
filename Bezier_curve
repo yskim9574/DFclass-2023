@@ -1,0 +1,31 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+def bezier_curve_quadratic(p0, p1, p2, num_points=100):
+    t = np.linspace(0, 1, num_points)
+    x_coords = (1 - t)**2 * p0[0] + 2 * t * (1 - t) * p1[0] + t**2 * p2[0]
+    y_coords = (1 - t)**2 * p0[1] + 2 * t * (1 - t) * p1[1] + t**2 * p2[1]
+    return x_coords, y_coords
+
+p0 = (0, 0)
+p1 = (12, 3)
+p2 = (8, 5.5)
+bezier_x, bezier_y = bezier_curve_quadratic(p0, p1, p2)
+
+plt.figure(figsize=(6,4)) 
+plt.plot([p0[0], p1[0], p2[0]], [p0[1], p1[1], p2[1]], 'ro--', 
+         label='Control Polygon', alpha=0.6)
+plt.plot(p0[0], p0[1], 'ro', markersize=10)
+plt.text(p0[0] + 0.5, p0[1] - 0.5, '$P_0(0,0)$', fontsize=12, color='red')
+plt.plot(p1[0], p1[1], 'ro', markersize=10)
+plt.text(p1[0] + 0.5, p1[1] + 0.5, '$P_1(12,3)$', fontsize=12, color='red')
+plt.plot(p2[0], p2[1], 'ro', markersize=10)
+plt.text(p2[0] - 2, p2[1] + 0.5, '$P_2(8,5.5)$', fontsize=12, color='red') 
+plt.plot(bezier_x, bezier_y, 'b-', linewidth=2, label='Bezier Curve')
+plt.title('2nd Order Bezier Curve with Control Points', fontsize=15)
+plt.xlabel('X-axis', fontsize=12)
+plt.ylabel('Y-axis', fontsize=12)
+plt.grid(True)
+plt.legend()
+plt.axis('equal') 
+plt.show()
