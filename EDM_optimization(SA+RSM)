@@ -1,0 +1,155 @@
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+
+# -------------------------------------------------------
+# 1. DOE 데이터 입력
+# -------------------------------------------------------
+data = pd.DataFrame({
+    "V":   [80, 80, 80, 80, 80,
+            160,160,160,160,160,
+            200,200,200,200,200],
+    "I":   [ 6,  6, 16, 16, 48,
+              6, 16, 16, 48, 48,
+              6,  6, 16, 48, 48],
+    "Ton":[ 6.4, 800,  6.4, 800, 100,
+            800, 100, 800, 100, 800,
+            6.4, 800, 100,  6.4, 800],
+    "Toff":[400, 12.8, 400, 12.8, 12.8,
+            12.8, 12.8,  50, 12.8, 400,
+            400,  50, 12.8, 12.8,  50],
+    "MRR":[0.2, 0.3, 0.3, 10, 63,
+           0.2, 20.4, 12.8, 55.1, 44,
+           0.3, 0.3, 21.6,  7.6, 54],
+    "Ra": [2.62, 2.87, 3.05, 7.63, 9.75,
+           2.68, 8.32, 7.85, 9.31,10.61,
+           2.05, 2.69, 8.32, 4.27,10.43]
+})
+
+X = data[["V","I","Ton","Toff"]].values.astype(float)
+y_mrr = data["MRR"].values
+y_ra  = data["Ra"].values
+
+# -------------------------------------------------------
+# 2. RSM(2차 다항 회귀) 모델 학습
+# -------------------------------------------------------
+poly = PolynomialFeatures(degree=2, include_bias=False)
+X_poly = poly.fit_transform(X)
+
+mrr_model = LinearRegression().fit(X_poly, y_mrr)
+ra_model  = LinearRegression().fit(X_poly, y_ra)
+
+# -------------------------------------------------------
+# 3. 목적함수 정의
+# f(I,V,Ton,Toff) = -w1*MRR + w2*Ra (minimize)
+# 예측값은 DOE 범위로 클리핑하여 비현실적 발산 방지
+# -------------------------------------------------------
+mrr_min, mrr_max = y_mrr.min(), y_mrr.max()
+ra_min,  ra_max  = y_ra.min(),  y_ra.max()
+
+w1, w2 = 0.5, 0.5   # 필요시 문헌 기준값으로 조정
+lambda_pen = 0.1   # Ra 페널티
+
+def predict_mrr_ra(x):
+    x = np.asarray(x, dtype=float).reshape(1, -1)
+    xp = poly.transform(x)
+    mrr = mrr_model.predict(xp)[0]
+    ra  = ra_model.predict(xp)[0]
+    return mrr, ra
+
+def objective(x):
+    mrr_pred, ra_pred = predict_mrr_ra(x)
+
+    # DOE 범위로 클리핑
+    mrr_c = np.clip(mrr_pred, mrr_min, mrr_max)
+    ra_c  = np.clip(ra_pred,  ra_min,  ra_max)
+
+    # Ra 페널티 (Ra > 11일 때)
+    penalty = 0.0
+    if ra_c > 11.0:
+        penalty = (ra_c - 11.0)**2
+
+    f = -w1 * mrr_c + w2 * ra_c + lambda_pen * penalty
+    return f, mrr_c, ra_c
+
+# -------------------------------------------------------
+# 4. 변수 제약조건 범위
+# -------------------------------------------------------
+bounds = np.array([
+    [80.0, 200.0],  # V
+    [ 5.0,  50.0],  # I
+    [ 5.0, 800.0],  # Ton
+    [10.0, 400.0],  # Toff
+])
+
+rng = np.random.default_rng(0)
+
+def random_in_bounds():
+    return rng.uniform(bounds[:,0], bounds[:,1])
+
+def neighbor(x, step_scale=0.08):
+    x = np.asarray(x, dtype=float)
+    ranges = bounds[:,1] - bounds[:,0]
+    noise = rng.normal(0, step_scale, size=4) * ranges
+    x_new = x + noise
+    return np.clip(x_new, bounds[:,0], bounds[:,1])
+
+# -------------------------------------------------------
+# 5. Simulated Annealing (요청 파라미터 적용)
+# -------------------------------------------------------
+def simulated_annealing():
+    # 요청 파라미터
+    T = 400              # 초기 온도
+    T_low = 1e-5         # 종료 기준
+    K = 10               # Boltzmann constant
+    k1 = 0.9             # 냉각율
+    N = 100              # 온도당 반복횟수
+
+    # 초기 해
+    x_curr = random_in_bounds()
+    f_curr, m_curr, r_curr = objective(x_curr)
+
+    x_best, f_best = x_curr.copy(), f_curr
+    m_best, r_best = m_curr, r_curr
+
+    while T > T_low:
+        for _ in range(N):
+            x_new = neighbor(x_curr)
+            f_new, m_new, r_new = objective(x_new)
+            delta = f_new - f_curr  # minimize 기준
+
+            if delta < 0:
+                # 더 좋은 해는 바로 수용
+                x_curr, f_curr = x_new, f_new
+                m_curr, r_curr = m_new, r_new
+            else:
+                # 나쁜 해도 확률적으로 수용 (SA 핵심)
+                p = np.exp(-delta / (K * T))
+                if rng.random() < p:
+                    x_curr, f_curr = x_new, f_new
+                    m_curr, r_curr = m_new, r_new
+
+            # 최고 해 갱신
+            if f_curr < f_best:
+                x_best, f_best = x_curr.copy(), f_curr
+                m_best, r_best = m_curr, r_curr
+
+        # 냉각
+        T *= k1
+
+    return x_best, f_best, m_best, r_best
+
+# -------------------------------------------------------
+# 6. SA 실행
+# -------------------------------------------------------
+x_best, f_best, m_best, r_best = simulated_annealing()
+
+print("\n=== Simulated Annealing 최적 조건(요청 파라미터 적용) ===")
+print(f"V    = {x_best[0]:.2f} V")
+print(f"I    = {x_best[1]:.2f} A")
+print(f"Ton  = {x_best[2]:.2f} µs")
+print(f"Toff = {x_best[3]:.2f} µs")
+print(f"예측 MRR = {m_best:.2f} g/h")
+print(f"예측 Ra  = {r_best:.2f} µm")
+print(f"목적함수 f = {f_best:.4f}")
