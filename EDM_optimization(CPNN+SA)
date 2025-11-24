@@ -55,7 +55,8 @@ class SimpleCPNN:
         self.n_epochs = n_epochs
         self.rng = np.random.default_rng(seed)
 
-        self.W_som = self.rng.normal(size=(n_neurons, input_dim))
+        #self.W_som = self.rng.normal(size=(n_neurons, input_dim))
+        self.W_som = self.rng.random((n_neurons, input_dim))
         self.W_grossberg = np.zeros(n_neurons)
         self.neuron_pos = np.arange(n_neurons)
 
