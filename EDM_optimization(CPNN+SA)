@@ -1,0 +1,219 @@
+import numpy as np
+import pandas as pd
+
+# ============================================
+# 1. DOE 데이터 (예: EDM 실험 데이터)
+# ============================================
+data = pd.DataFrame({
+    "V":   [80, 80, 80, 80, 80,
+            160,160,160,160,160,
+            200,200,200,200,200],
+    "I":   [ 6,  6, 16, 16, 48,
+              6, 16, 16, 48, 48,
+              6,  6, 16, 48, 48],
+    "Ton":[ 6.4, 800,  6.4, 800, 100,
+            800, 100, 800, 100, 800,
+            6.4, 800, 100,  6.4, 800],
+    "Toff":[400, 12.8, 400, 12.8, 12.8,
+            12.8, 12.8,  50, 12.8, 400,
+            400,  50, 12.8, 12.8,  50],
+    "MRR":[0.2, 0.3, 0.3, 10, 63,
+           0.2, 20.4, 12.8, 55.1, 44,
+           0.3, 0.3, 21.6,  7.6, 54],
+    "Ra": [2.62, 2.87, 3.05, 7.63, 9.75,
+           2.68, 8.32, 7.85, 9.31,10.61,
+           2.05, 2.69, 8.32, 4.27,10.43]
+})
+
+X_raw = data[["V","I","Ton","Toff"]].values.astype(float)
+y_mrr = data["MRR"].values
+y_ra  = data["Ra"].values
+
+# ============================================
+# 2. 입력 스케일링 (0~1 정규화)
+#    CPNN이 사용
+# ============================================
+X_min = X_raw.min(axis=0)
+X_max = X_raw.max(axis=0)
+X = (X_raw - X_min) / (X_max - X_min + 1e-12)  # 정규화 입력
+
+# ============================================
+# 3. Simple CPNN (1D SOM + Grossberg)
+#    - MRR용 1개
+#    - Ra 용 1개
+# ============================================
+class SimpleCPNN:
+    def __init__(self, input_dim, n_neurons=6,
+                 som_lr=0.4, som_sigma=1.5,
+                 grossberg_lr=0.3, n_epochs=400,
+                 seed=0):
+        self.input_dim = input_dim
+        self.n_neurons = n_neurons
+        self.som_lr = som_lr
+        self.som_sigma = som_sigma
+        self.grossberg_lr = grossberg_lr
+        self.n_epochs = n_epochs
+        self.rng = np.random.default_rng(seed)
+
+        self.W_som = self.rng.normal(size=(n_neurons, input_dim))
+        self.W_grossberg = np.zeros(n_neurons)
+        self.neuron_pos = np.arange(n_neurons)
+
+    def _find_bmu(self, x):
+        dists = np.linalg.norm(self.W_som - x[None,:], axis=1)
+        return np.argmin(dists)
+
+    def fit(self, X, y):
+        N = X.shape[0]
+        for _ in range(self.n_epochs):
+            idx = self.rng.permutation(N)
+            for i in idx:
+                x = X[i]
+                target = y[i]
+
+                # --- Kohonen(SOM) 업데이트 ---
+                bmu = self._find_bmu(x)
+                dist_to_bmu = np.abs(self.neuron_pos - bmu)
+                h = np.exp(-(dist_to_bmu**2)/(2*(self.som_sigma**2)))
+                self.W_som += self.som_lr * h[:,None] * (x[None,:] - self.W_som)
+
+                # --- Grossberg 지도학습 ---
+                self.W_grossberg[bmu] += self.grossberg_lr * (target - self.W_grossberg[bmu])
+
+    def predict(self, X):
+        X = np.atleast_2d(X)
+        preds = []
+        for x in X:
+            bmu = self._find_bmu(x)
+            preds.append(self.W_grossberg[bmu])
+        return np.array(preds)
+
+# MRR, Ra 각각 CPNN 학습
+cpnn_mrr = SimpleCPNN(input_dim=4, seed=1)
+cpnn_ra  = SimpleCPNN(input_dim=4, seed=2)
+
+cpnn_mrr.fit(X, y_mrr)
+cpnn_ra.fit(X, y_ra)
+
+# ============================================
+# 4. CPNN 근사모델로부터 MRR, Ra 예측 함수
+#    (실제 단위 입력 → 정규화 → CPNN)
+# ============================================
+def predict_mrr_ra_by_cpnn(x_raw):
+    x_raw = np.asarray(x_raw, dtype=float)
+    x_norm = (x_raw - X_min) / (X_max - X_min + 1e-12)
+    mrr_hat = cpnn_mrr.predict(x_norm.reshape(1,-1))[0]
+    ra_hat  = cpnn_ra.predict( x_norm.reshape(1,-1))[0]
+    return mrr_hat, ra_hat
+
+# ============================================
+# 5. 목적함수 f = -w1*MRR + w2*Ra  (minimize)
+#    블록다이어그램의 E^MRR, E^Ra 에 해당
+# ============================================
+w1, w2 = 0.5, 0.5   # 중요도 (원하면 조절)
+
+def objective(x_raw):
+    """
+    x_raw: [V, I, Ton, Toff]
+    반환: f, E_MRR, E_Ra
+    """
+    mrr_hat, ra_hat = predict_mrr_ra_by_cpnn(x_raw)
+    # 단순 가중합 (원 논문 f(I,V,Ton,Toff) = -w1*MRR + w2*Ra 형태)
+    f = -w1 * mrr_hat + w2 * ra_hat
+    return f, mrr_hat, ra_hat
+
+# ============================================
+# 6. SA 파라미터 및 제약 범위
+#    (블록다이어그램 그대로)
+# ============================================
+bounds = np.array([
+    [80.0, 200.0],  # V
+    [ 5.0,  50.0],  # I
+    [ 5.0, 800.0],  # Ton
+    [10.0, 400.0],  # Toff
+])
+
+rng = np.random.default_rng(123)
+
+def random_feasible_point():
+    return rng.uniform(bounds[:,0], bounds[:,1])
+
+# D: 각 변수별 최대 이동 크기 (범위의 10%)
+D = 0.1 * (bounds[:,1] - bounds[:,0])
+
+# ============================================
+# 7. Simulated Annealing (블록다이어그램 순서 그대로 구현)
+# ============================================
+def simulated_annealing_cpnn():
+    # --- Random initial feasible point X0 ---
+    X0 = random_feasible_point()
+    E1, Emrr1, Era1 = objective(X0)   # E1^MRR, E1^Ra 는 여기서 Emrr1, Era1
+
+    # --- Set T = 400, t = 1 ---
+    T = 400.0
+    T_low = 1e-5
+    K = 10.0
+    k1 = 0.9
+    N = 100
+
+    t = 1
+
+    # best 해 저장
+    X_best = X0.copy()
+    E_best, MRR_best, Ra_best = E1, Emrr1, Era1
+
+    while T > T_low:
+        t = 1
+        while t < N:
+            # --- Generate new solution vector ---
+            # X_r = X_0 + D * (rand(4) - 0.5)
+            rand_vec = rng.random(4) - 0.5
+            Xr = X0 + D * rand_vec
+            # 제약 범위 밖이면 잘라냄
+            Xr = np.clip(Xr, bounds[:,0], bounds[:,1])
+
+            # 새 해의 목적함수
+            E2, Emrr2, Era2 = objective(Xr)
+
+            dE = E2 - E1  # ΔE = E2 - E1  (minimize 기준)
+
+            # --- Is ΔE ≤ 0 ? ---
+            if dE <= 0:
+                # Yes: 무조건 수용
+                X0 = Xr
+                E1, Emrr1, Era1 = E2, Emrr2, Era2
+            else:
+                # No: Is P(E) ≥ rand ?
+                P = np.exp(-dE / (K * T))
+                if P >= rng.random():
+                    # 나쁜 해도 확률적으로 수용
+                    X0 = Xr
+                    E1, Emrr1, Era1 = E2, Emrr2, Era2
+                # else: 거부하고 X0, E1 유지
+
+            # global best 갱신
+            if E1 < E_best:
+                X_best = X0.copy()
+                E_best, MRR_best, Ra_best = E1, Emrr1, Era1
+
+            # t = t + 1
+            t += 1
+
+        # Is t ≥ N ? → Yes → T = T * k1
+        T = T * k1
+
+    return X_best, E_best, MRR_best, Ra_best
+
+# ============================================
+# 8. 실행 및 결과 출력
+# ============================================
+X_opt, E_opt, MRR_opt, Ra_opt = simulated_annealing_cpnn()
+
+print("\n=== CPNN surrogate + SA (flowchart 기반) 최적 조건 ===")
+print(f"V    = {X_opt[0]:.2f} V")
+print(f"I    = {X_opt[1]:.2f} A")
+print(f"Ton  = {X_opt[2]:.2f} µs")
+print(f"Toff = {X_opt[3]:.2f} µs")
+print(f"예측 MRR = {MRR_opt:.2f} g/h")
+print(f"예측 Ra  = {Ra_opt:.2f} µm")
+print(f"목적함수 f = {E_opt:.4f}  (작을수록 좋음)")
