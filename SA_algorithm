@@ -1,0 +1,32 @@
+import random
+import math
+
+def accept_worse_solution(현재_해, 새로운_해, 온도):
+    """나쁜 해를 받아들일지 결정"""
+    if 새로운_해 > 현재_해:  
+        return True, 
+    
+    차이 = 현재_해 - 새로운_해  
+    확률 = math.exp(-차이 / 온도)
+    주사위 = random.random()  # 0~1 랜덤
+    
+    print(f"  📊 확률: {확률:.3f} (= {확률*100:.1f}%)")
+    print(f"  🎲 주사위: {주사위:.3f}")
+    print(f"  💡 설명: 주사위가 {주사위:.3f}이고, 확률이 {확률:.3f}이므로")
+    
+    if 주사위 < 확률:
+        print(f"      → {주사위:.3f} < {확률:.3f} ✅ 받아들임!")
+        return True
+    else:
+        print(f"      → {주사위:.3f} >= {확률:.3f} ❌ 거부!")
+        return False
+
+# 테스트
+print("="*60)
+print("현재 해는 100점, 새로운 해는 90점 (10점 나빠짐)")
+print("="*60)
+
+for 온도 in [100, 50, 10, 1]:
+    print(f"\n🌡️  온도 = {온도}도")
+    결과 = accept_worse_solution(100, 90, 온도)
+    print()
