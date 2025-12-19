@@ -4,97 +4,134 @@ from tensorflow.keras import layers, models
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 import matplotlib.pyplot as plt
 from PIL import Image
+import os
+from google.colab import drive
 
-# Load your handwritten X and non-X images for training
+# 1. 구글 드라이브 연결
+drive.mount('/content/drive')
+
+base_path = "/content/drive/MyDrive/handwriting_letter/"
+train_x_dir = os.path.join(base_path, "train", "X")
+train_non_x_dir = os.path.join(base_path, "train", "non-X")
+test_dir = os.path.join(base_path, "test")
+
+# [중요 변경 1] 해상도를 224는 너무 크고 15는 너무 작으니, 50 정도로 타협함.
+INPUT_SIZE = (50, 50) 
+
+# -----------------------------------------------------------
+# 2. 데이터 로드 (학습용)
+# -----------------------------------------------------------
+print("--- 데이터 로드 중 ---")
 X_images = []
 non_X_images = []
-for i in range(1, 11):
-    image_path = f"X_image_{i}.jpg"  # Update with your actual file names for X images
-    img = Image.open(image_path).convert('L')  # Convert to grayscale
-    img = img.resize((15, 15))  # Increase the image resolution
-    X_images.append(np.array(img))
 
-for i in range(1, 11):
-    image_path = f"non_X_image_{i}.jpg"  # Update with your actual file names for non-X images
-    img = Image.open(image_path).convert('L')  # Convert to grayscale
-    img = img.resize((15, 15))  # Increase the image resolution
-    non_X_images.append(np.array(img))
+for i in range(1, 20):
+    p = os.path.join(train_x_dir, f"X_image_{i}.jpg")
+    if os.path.exists(p):
+        img = Image.open(p).convert('L').resize(INPUT_SIZE)
+        X_images.append(np.array(img))
 
-# Labels: X -> 1, non-X -> 0
-labels = np.concatenate([np.ones(len(X_images)), np.zeros(len(non_X_images))])
-images = np.array(X_images + non_X_images)
+for i in range(1, 20):
+    p = os.path.join(train_non_x_dir, f"non_X_image_{i}.jpg")
+    if os.path.exists(p):
+        img = Image.open(p).convert('L').resize(INPUT_SIZE)
+        non_X_images.append(np.array(img))
 
-# Shuffle the dataset
-indices = np.arange(len(images))
+if not X_images or not non_X_images:
+    raise ValueError("학습 데이터가 없습니다.")
+
+# 데이터 병합 및 라벨링
+train_images = np.array(X_images + non_X_images).astype('float32') / 255.0
+train_images = np.expand_dims(train_images, axis=-1)
+train_labels = np.concatenate([np.ones(len(X_images)), np.zeros(len(non_X_images))])
+
+# 셔플
+indices = np.arange(len(train_images))
 np.random.shuffle(indices)
-labels = labels[indices]
-images = images[indices]
+train_images = train_images[indices]
+train_labels = train_labels[indices]
 
-# Define the model
+# -----------------------------------------------------------
+# 3. 모델 정의 (50x50 해상도에 맞춘 최적화 모델)
+# -----------------------------------------------------------
 model = models.Sequential([
-    layers.Conv2D(32, (3, 3), activation='relu', padding='same', input_shape=(15, 15, 1)),
+    # 입력층
+    layers.Conv2D(32, (3, 3), activation='relu', padding='same', input_shape=(INPUT_SIZE[0], INPUT_SIZE[1], 1)),
     layers.MaxPooling2D((2, 2)),
+    
+    # 중간층 (데이터가 적으므로 너무 깊게 쌓지 않음)
     layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
+    layers.MaxPooling2D((2, 2)),
+    
     layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
+    layers.MaxPooling2D((2, 2)),
+
+    # 출력층
     layers.Flatten(),
     layers.Dense(64, activation='relu'),
-#    layers.Dense(2, activation='sigmoid')  # Output layer with 2 neurons for binary classification
-    layers.Dense(2, activation='softmax')  # Output layer with 2 neurons for binary classification
+    layers.Dropout(0.5), # 과적합 방지용 Dropout 추가
+    layers.Dense(2, activation='softmax')
 ])
 
-
-model.compile(optimizer='adam',
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), # 학습률 명시
               loss='sparse_categorical_crossentropy',
               metrics=['accuracy'])
 
-# Perform data augmentation
+# -----------------------------------------------------------
+# 4. 학습 (반복 횟수 증가)
+# -----------------------------------------------------------
 datagen = ImageDataGenerator(
-    rotation_range=20,
-    width_shift_range=0.2,
-    height_shift_range=0.2,
-    shear_range=0.2,
-    zoom_range=0.2,
-    horizontal_flip=True,
-    fill_mode='nearest')
+    rotation_range=15, width_shift_range=0.1, height_shift_range=0.1,
+    zoom_range=0.1, horizontal_flip=False, fill_mode='nearest' # X자는 뒤집으면 모양이 바뀔 수 있어 flip False 고려
+)
 
-# Fit the model on the augmented data
-model.fit(datagen.flow(images.reshape(-1, 15, 15, 1), labels, batch_size=4), epochs=10)
+print("\n--- 학습 시작 ---")
+# [중요 변경 2] epochs를 10 -> 30으로 늘려서 충분히 학습시킴
+model.fit(datagen.flow(train_images, train_labels, batch_size=4), 
+          steps_per_epoch=len(train_images), # 데이터 뻥튀기 효과
+          epochs=30, 
+          verbose=1)
 
-# Load the new test images
-new_test_images = []
-for i in range(1, 5):  # Update the range to include all four new test images
-    image_path = f"new_test_image_{i}.jpg"  # Update with your actual file names for new test images
-    img = Image.open(image_path).convert('L')  # Convert to grayscale
-    img = img.resize((15, 15))  # Increase the image resolution
-    new_test_images.append(np.array(img))
+# -----------------------------------------------------------
+# 5. 테스트 및 시각화
+# -----------------------------------------------------------
+test_images = []
+test_image_names = []
 
-# Predict whether the new test images are X or non-X letters
-new_test_images = np.array(new_test_images)
-new_test_images = np.expand_dims(new_test_images, axis=-1)
-predictions = model.predict(new_test_images)
+for i in range(1, 6):
+    filename = f"test_image_{i}.jpg"
+    p = os.path.join(test_dir, filename)
+    if os.path.exists(p):
+        img = Image.open(p).convert('L').resize(INPUT_SIZE)
+        test_images.append(np.array(img))
+        test_image_names.append(filename)
 
-# Evaluate the model on the new test data
-true_labels = np.array([1, 1, 0, 0])  # Actual labels for the new test images (assuming first two are X, last two are non-X)
-loss, accuracy = model.evaluate(new_test_images, true_labels)
-print(f"Loss: {loss}, Accuracy: {accuracy}")
+test_input = np.array(test_images).astype('float32') / 255.0
+test_input = np.expand_dims(test_input, axis=-1)
 
-# Getting probabilistic values
-probabilities = model.predict(new_test_images)
+predictions = model.predict(test_input)
 
-# Get the flattened layer values
-flattened_output = model.layers[-3].output
-flattened_model = tf.keras.Model(inputs=model.input, outputs=flattened_output)
-flattened_features = flattened_model.predict(new_test_images)
+# 시각화
+plt.figure(figsize=(15, 4))
+for i in range(len(test_input)):
+    plt.subplot(1, 5, i + 1)
+    plt.imshow(test_images[i], cmap='gray')
+    
+    prob_non_x = predictions[i][0]
+    prob_x = predictions[i][1]
+    
+    pred_label = "X" if prob_x > 0.5 else "Non-X"
+    
+    # 색상: X면 파란색, 아니면 빨간색 (구분 쉽게)
+    text_color = 'blue' if pred_label == 'X' else 'red'
 
-print("Flattened Layer Values:", flattened_features.round(3))
-print("Probabilistic Values:", probabilities.round(4))
-
-# Display the new test images with predictions
-plt.figure(figsize=(10, 5))
-for i in range(len(new_test_images)):
-    plt.subplot(1, 4, i + 1)
-    plt.imshow(new_test_images[i].squeeze(), cmap='gray')  # Show grayscale images
-    predicted_class = "X" if np.argmax(predictions[i]) == 1 else "Non-X"
-    plt.title(f"Predicted: {predicted_class}")
+    title_text = (f"{test_image_names[i]}\n"
+                  f"Pred: {pred_label}\n"
+                  f"P(X): {prob_x:.2f}\n"
+                  f"P(Non-X): {prob_non_x:.2f}")
+    
+    plt.title(title_text, fontsize=10, color=text_color, fontweight='bold')
     plt.axis('off')
+
+plt.tight_layout()
 plt.show()
