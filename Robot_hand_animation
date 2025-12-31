@@ -1,0 +1,126 @@
+import math
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+# -----------------------------
+# IK / FK
+# -----------------------------
+def inverse_kinematics(x, y, L1, L2, elbow="down"):
+    r2 = x*x + y*y
+    cos_t2 = (r2 - L1*L1 - L2*L2) / (2*L1*L2)
+    if cos_t2 < -1 or cos_t2 > 1:
+        raise ValueError("Target is unreachable (cos(theta2) out of range).")
+
+    t2 = math.acos(cos_t2)  # principal solution
+
+    # elbow-up option (use negative theta2)
+    if elbow == "up":
+        t2 = -t2
+
+    k1 = L1 + L2*math.cos(t2)
+    k2 = L2*math.sin(t2)
+    t1 = math.atan2(y, x) - math.atan2(k2, k1)
+    return t1, t2
+
+def forward_kinematics(t1, t2, L1, L2):
+    x1 = L1 * math.cos(t1)
+    y1 = L1 * math.sin(t1)
+    x2 = x1 + L2 * math.cos(t1 + t2)
+    y2 = y1 + L2 * math.sin(t1 + t2)
+    return (0.0, 0.0), (x1, y1), (x2, y2)
+
+# -----------------------------
+# Main: A -> B -> C animation
+# -----------------------------
+if __name__ == "__main__":
+    # Targets
+    A = (1.7, 0.0)
+    B = (1.5, 0.7)
+    C = (0.2, 1.7)
+
+    # Link lengths
+    L1, L2 = 1.0, 1.5
+
+    # Choose elbow configuration: "down" or "up"
+    elbow_mode = "down"
+
+    # IK for A, B, C
+    t1a, t2a = inverse_kinematics(*A, L1, L2, elbow=elbow_mode)
+    t1b, t2b = inverse_kinematics(*B, L1, L2, elbow=elbow_mode)
+    t1c, t2c = inverse_kinematics(*C, L1, L2, elbow=elbow_mode)
+
+    # Interpolate joint angles (A->B->C)
+    N1, N2 = 60, 90   # frames for A->B, B->C
+    t1_path = np.concatenate([np.linspace(t1a, t1b, N1, endpoint=False),
+                              np.linspace(t1b, t1c, N2, endpoint=True)])
+    t2_path = np.concatenate([np.linspace(t2a, t2b, N1, endpoint=False),
+                              np.linspace(t2b, t2c, N2, endpoint=True)])
+
+    # Figure setup
+    fig, ax = plt.subplots(figsize=(4,4))
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlim(-2.6, 2.6)
+    ax.set_ylim(-2.6, 2.6)
+    ax.grid(True)
+
+    # Plot targets A, B, C
+    ax.scatter([A[0], B[0], C[0]], [A[1], B[1], C[1]], s=60)
+    ax.text(A[0]+0.05, A[1]+0.05, "A")
+    ax.text(B[0]+0.05, B[1]+0.05, "B")
+    ax.text(C[0]+0.05, C[1]+0.05, "C")
+
+    # Artists
+    arm_line, = ax.plot([], [], marker="o", linewidth=3)   # base->joint1->ee
+    ee_path_line, = ax.plot([], [], linewidth=2)           # end-effector trajectory
+    title = ax.set_title("2-Link Robot Arm: A → B → C")
+
+    ee_traj = []
+
+    def init():
+        arm_line.set_data([], [])
+        ee_path_line.set_data([], [])
+        return arm_line, ee_path_line, title
+
+    def update(i):
+        base, j1, ee = forward_kinematics(float(t1_path[i]), float(t2_path[i]), L1, L2)
+
+        # Arm
+        xs = [base[0], j1[0], ee[0]]
+        ys = [base[1], j1[1], ee[1]]
+        arm_line.set_data(xs, ys)
+
+        # End-effector path
+        ee_traj.append(ee)
+        ex, ey = zip(*ee_traj)
+        ee_path_line.set_data(ex, ey)
+
+        title.set_text(f"2-Link Robot Arm: frame {i+1}/{len(t1_path)}  (elbow={elbow_mode})")
+        return arm_line, ee_path_line, title
+
+    fps = 20
+    ani = FuncAnimation(fig, update, frames=len(t1_path), init_func=init,
+                        interval=1000/fps, blit=True)
+
+    # -----------------------------
+    # Save video (MP4) or GIF
+    # -----------------------------
+    mp4_name = "robot_arm_A_B_C.mp4"
+    gif_name = "robot_arm_A_B_C.gif"
+
+    # 1) Try MP4 (needs ffmpeg installed)
+    try:
+        ani.save(mp4_name, writer="ffmpeg", fps=fps, dpi=150)
+        print(f"[OK] Saved MP4: {mp4_name}")
+    except Exception as e:
+        print("[WARN] MP4 저장 실패(보통 ffmpeg 미설치). GIF로 저장을 시도합니다.")
+        print("       에러:", e)
+        # 2) Fallback: GIF (needs pillow)
+        ani.save(gif_name, writer="pillow", fps=fps, dpi=150)
+        print(f"[OK] Saved GIF: {gif_name}")
+
+    plt.close(fig)  # 저장 후 창 닫기(원하면 제거)
+
+    from IPython.display import Video, display
+
+display(Video("robot_arm_A_B_C.mp4", embed=True))
