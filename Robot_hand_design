@@ -1,0 +1,151 @@
+import math
+import numpy as np
+import matplotlib.pyplot as plt
+
+# -----------------------------
+# Inputs
+# -----------------------------
+L1, L2 = 1.0, 1.5
+m1, I1 = 2.0, 0.021
+m2, I2 = 1.1, 0.07
+mp = 10.0
+g = 9.81
+
+A = np.array([1.7, 0.0])
+C = np.array([0.2, 1.7])
+T = 5.0
+
+fps = 200
+N = int(T * fps) + 1
+t = np.linspace(0, T, N)
+dt = t[1] - t[0]
+
+# Quintic time scaling (zero vel/acc endpoints)
+u = t / T
+s = 10*u**3 - 15*u**4 + 6*u**5
+
+# Straight-line path in task space
+pos = A[None, :] + s[:, None] * (C - A)[None, :]
+x, y = pos[:, 0], pos[:, 1]
+
+def ik_elbow_down(x, y, L1, L2):
+    r2 = x*x + y*y
+    cos_q2 = (r2 - L1*L1 - L2*L2) / (2*L1*L2)
+    cos_q2 = np.clip(cos_q2, -1.0, 1.0)
+    q2 = np.arccos(cos_q2)
+    k1 = L1 + L2*np.cos(q2)
+    k2 = L2*np.sin(q2)
+    q1 = np.arctan2(y, x) - np.arctan2(k2, k1)
+    return q1, q2
+
+# IK → joint angles
+q1, q2 = ik_elbow_down(x, y, L1, L2)
+q1 = np.unwrap(q1)
+q2 = np.unwrap(q2)
+
+# Derivatives
+q1d  = np.gradient(q1, dt)
+q2d  = np.gradient(q2, dt)
+q1dd = np.gradient(q1d, dt)
+q2dd = np.gradient(q2d, dt)
+
+# -----------------------------
+# Dynamics terms: tau = M qdd + C + G
+# -----------------------------
+r1 = L1/2
+r2 = L2/2
+c2 = np.cos(q2)
+s2 = np.sin(q2)
+
+k = (m2*L1*r2 + mp*L1*L2)
+
+M11 = I1 + I2 + m1*r1**2 + m2*(L1**2 + r2**2 + 2*L1*r2*c2) + mp*(L1**2 + L2**2 + 2*L1*L2*c2)
+M12 = I2 + m2*(r2**2 + L1*r2*c2) + mp*(L2**2 + L1*L2*c2)
+M22 = I2 + m2*(r2**2) + mp*(L2**2)
+
+# Inertia torque
+tau1_in = M11*q1dd + M12*q2dd
+tau2_in = M12*q1dd + M22*q2dd
+
+# Coriolis/centrifugal torque
+tau1_c = -k * s2 * (2*q1d*q2d + q2d**2)
+tau2_c =  k * s2 * (q1d**2)
+
+# Gravity torque
+tau1_g = (m1*r1 + m2*L1 + mp*L1)*g*np.cos(q1) + (m2*r2 + mp*L2)*g*np.cos(q1 + q2)
+tau2_g = (m2*r2 + mp*L2)*g*np.cos(q1 + q2)
+
+# Total torque
+tau1 = tau1_in + tau1_c + tau1_g
+tau2 = tau2_in + tau2_c + tau2_g
+
+# -----------------------------
+# Plots
+# -----------------------------
+plt.figure(figsize=(9,5))
+plt.plot(t, q1, label="θ̇1 (rad)")
+plt.plot(t, q2, label="θ̇2 (rad)", linestyle="--")
+plt.xlabel("Time (s)")
+plt.ylabel("Angle (rad)")
+plt.title("Joint Angles (A → C in 5 s)")
+plt.grid(True)
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(9,5))
+plt.plot(t, q1d, label="θ̇1 (rad/s)")
+plt.plot(t, q2d, label="θ̇2 (rad/s)", linestyle="--")
+plt.xlabel("Time (s)")
+plt.ylabel("Angular velocity (rad/s)")
+plt.title("Joint Angular Velocities (A → C in 5 s)")
+plt.grid(True)
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(9,5))
+plt.plot(t, q1dd, label="θ̈1 (rad/s²)")
+plt.plot(t, q2dd, label="θ̈2 (rad/s²)", linestyle="--")
+plt.xlabel("Time (s)")
+plt.ylabel("Angular acceleration (rad/s²)")
+plt.title("Joint Angular Accelerations (A → C in 5 s)")
+plt.grid(True)
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(9,5))
+plt.plot(t, tau1,   label="Total τ1")
+plt.plot(t, tau1_g, label="Gravity τ1_g", linestyle=":")
+plt.plot(t, tau1_in,label="Inertia τ1_in", linestyle="--")
+plt.plot(t, tau1_c, label="Coriolis/Centrifugal τ1_c",linestyle="-.")
+plt.xlabel("Time (s)")
+plt.ylabel("Torque (N·m)")
+plt.title("Joint 1 Torque Decomposition")
+plt.grid(True)
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(9,5))
+plt.plot(t, tau2,   label="Total τ2")
+plt.plot(t, tau2_g, label="Gravity τ2_g", linestyle=":")
+plt.plot(t, tau2_in,label="Inertia τ2_in", linestyle="--")
+plt.plot(t, tau2_c, label="Coriolis/Centrifugal τ2_c", linestyle="-.")
+plt.xlabel("Time (s)")
+plt.ylabel("Torque (N·m)")
+plt.title("Joint 2 Torque Decomposition")
+plt.grid(True)
+plt.legend()
+plt.show()
+
+print("Ranges (min to max):")
+print(f"θ̇1: {q1d.min():.3f} to {q1d.max():.3f} rad/s")
+print(f"θ̇2: {q2d.min():.3f} to {q2d.max():.3f} rad/s")
+print(f"θ̈1: {q1dd.min():.3f} to {q1dd.max():.3f} rad/s²")
+print(f"θ̈2: {q2dd.min():.3f} to {q2dd.max():.3f} rad/s²")
+print(f"τ1 total: {tau1.min():.2f} to {tau1.max():.2f} N·m")
+print(f"τ2 total: {tau2.min():.2f} to {tau2.max():.2f} N·m")
+print(f"τ1_g: {tau1_g.min():.2f} to {tau1_g.max():.2f} N·m")
+print(f"τ2_g: {tau2_g.min():.2f} to {tau2_g.max():.2f} N·m")
+print(f"τ1_in: {tau1_in.min():.2f} to {tau1_in.max():.2f} N·m")
+print(f"τ2_in: {tau2_in.min():.2f} to {tau2_in.max():.2f} N·m")
+print(f"τ1_c: {tau1_c.min():.2f} to {tau1_c.max():.2f} N·m")
+print(f"τ2_c: {tau2_c.min():.2f} to {tau2_c.max():.2f} N·m")
