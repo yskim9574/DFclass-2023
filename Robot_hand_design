@@ -1,4 +1,3 @@
-import math
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -13,7 +12,7 @@ g = 9.81
 
 A = np.array([1.7, 0.0])
 C = np.array([0.2, 1.7])
-T = 5.0
+T = 1.0
 
 fps = 200
 N = int(T * fps) + 1
@@ -78,6 +77,9 @@ tau2_g = (m2*r2 + mp*L2)*g*np.cos(q1 + q2)
 # Total torque
 tau1 = tau1_in + tau1_c + tau1_g
 tau2 = tau2_in + tau2_c + tau2_g
+
+P1=tau1*q1d
+P2=tau2*q2d
 
 # -----------------------------
 # Plots
@@ -149,3 +151,16 @@ print(f"τ1_in: {tau1_in.min():.2f} to {tau1_in.max():.2f} N·m")
 print(f"τ2_in: {tau2_in.min():.2f} to {tau2_in.max():.2f} N·m")
 print(f"τ1_c: {tau1_c.min():.2f} to {tau1_c.max():.2f} N·m")
 print(f"τ2_c: {tau2_c.min():.2f} to {tau2_c.max():.2f} N·m")
+
+# Plot comparison
+plt.figure(figsize=(9,5))
+plt.plot(t, P1, label="P1 = τ1·θ̇1")
+plt.plot(t, P2, label="P2 = τ2·θ̇2", linestyle="--")
+plt.axhline(0, linewidth=1)
+plt.xlabel("Time (s)")
+plt.ylabel("Power (W)")
+plt.title("Mechanical Power Comparison (A → C in 5 s)")
+plt.grid(True)
+plt.legend()
+plt.show()
+
