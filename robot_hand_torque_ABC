@@ -1,0 +1,186 @@
+import numpy as np
+import math
+import matplotlib.pyplot as plt
+
+# -----------------------------
+# 1) Robot + payload parameters
+# -----------------------------
+g = 9.81
+L1, L2 = 1.0, 1.5                      # link lengths [m]
+m1, m2, mp = 2.0, 1.1, 10.0            # masses [kg] (payload at EE)
+I1, I2 = 0.021, 0.07                   # link rotational inertia about COM (assumed) [kg·m^2]
+r1, r2 = L1/2, L2/2                    # COM distances from proximal joint
+
+# Trajectory points in task space
+A = (1.7, 0.0)
+B = (1.5, 0.7)
+C = (0.2, 1.7)
+
+# Timing
+T_AB = 2.0
+T_BC = 3.0
+dt = 0.002  # 500 Hz (smaller -> smoother derivatives)
+
+# -----------------------------
+# 2) Inverse kinematics (2-link planar)
+# -----------------------------
+def ik_2link(x, y, L1=1.0, L2=1.5, elbow_down=True):
+    r = math.hypot(x, y)
+    if r > L1 + L2 + 1e-9:
+        raise ValueError("Target outside workspace")
+
+    c2 = (x*x + y*y - L1*L1 - L2*L2) / (2*L1*L2)
+    c2 = max(-1.0, min(1.0, c2))
+    s2 = math.sqrt(max(0.0, 1 - c2*c2))
+    s2 = +s2 if elbow_down else -s2
+
+    q2 = math.atan2(s2, c2)
+
+    k1 = L1 + L2*c2
+    k2 = L2*s2
+    q1 = math.atan2(y, x) - math.atan2(k2, k1)
+    return q1, q2
+
+# -----------------------------
+# 3) Quintic time scaling for "stop at ends"
+#    s(0)=0, s(1)=1, sdot(0)=sdot(1)=0, sddot(0)=sddot(1)=0
+# -----------------------------
+def s_quintic(t, T):
+    tau = np.clip(t / T, 0.0, 1.0)
+    return 10*tau**3 - 15*tau**4 + 6*tau**5
+
+def make_task_segment(P0, P1, T, dt, elbow_down=True):
+    t = np.arange(0, T + 1e-12, dt)
+    s = s_quintic(t, T)
+
+    x = P0[0] + s*(P1[0] - P0[0])
+    y = P0[1] + s*(P1[1] - P0[1])
+
+    q1 = np.zeros_like(t)
+    q2 = np.zeros_like(t)
+    for i in range(len(t)):
+        q1[i], q2[i] = ik_2link(float(x[i]), float(y[i]), L1, L2, elbow_down=elbow_down)
+
+    return t, x, y, q1, q2
+
+# -----------------------------
+# 4) Dynamics: tau = M(q) qdd + C(q,qd) + G(q)
+# -----------------------------
+def M_matrix(q1, q2):
+    c2 = math.cos(q2)
+    M11 = (I1 + I2
+           + m1*r1**2
+           + m2*(L1**2 + r2**2 + 2*L1*r2*c2)
+           + mp*(L1**2 + L2**2 + 2*L1*L2*c2))
+    M12 = (I2
+           + m2*(r2**2 + L1*r2*c2)
+           + mp*(L2**2 + L1*L2*c2))
+    M22 = (I2 + m2*r2**2 + mp*L2**2)
+    return np.array([[M11, M12],
+                     [M12, M22]], dtype=float)
+
+def C_vector(q1, q2, q1d, q2d):
+    s2 = math.sin(q2)
+    h = -(m2*L1*r2 + mp*L1*L2) * s2
+    C1 = h*(2*q1d*q2d + q2d*q2d)
+    C2 = h*(q1d*q1d)
+    return np.array([C1, C2], dtype=float)
+
+def G_vector(q1, q2):
+    c1 = math.cos(q1)
+    c12 = math.cos(q1 + q2)
+    G1 = (m1*r1 + m2*L1 + mp*L1)*g*c1 + (m2*r2 + mp*L2)*g*c12
+    G2 = (m2*r2 + mp*L2)*g*c12
+    return np.array([G1, G2], dtype=float)
+
+def compute_torque_power(t, q1, q2):
+    dt = t[1] - t[0]
+
+    # numerical derivatives
+    q1d  = np.gradient(q1,  dt, edge_order=2)
+    q2d  = np.gradient(q2,  dt, edge_order=2)
+    q1dd = np.gradient(q1d, dt, edge_order=2)
+    q2dd = np.gradient(q2d, dt, edge_order=2)
+
+    n = len(t)
+    tau = np.zeros((n, 2))
+    tau_in = np.zeros((n, 2))
+    tau_c  = np.zeros((n, 2))
+    tau_g  = np.zeros((n, 2))
+
+    for i in range(n):
+        M = M_matrix(q1[i], q2[i])
+        qdd = np.array([q1dd[i], q2dd[i]])
+        c   = C_vector(q1[i], q2[i], q1d[i], q2d[i])
+        gv  = G_vector(q1[i], q2[i])
+
+        tin = M @ qdd
+        tau[i, :] = tin + c + gv
+        tau_in[i,:] = tin
+        tau_c[i,:]  = c
+        tau_g[i,:]  = gv
+
+    # mechanical power per joint
+    P = tau * np.column_stack([q1d, q2d])
+
+    # regen-capable mechanical energy (negative power integrated)
+    Preg = np.minimum(P, 0.0)
+    Ereg = -np.cumsum(Preg, axis=0) * dt
+
+    return dict(q1d=q1d, q2d=q2d, q1dd=q1dd, q2dd=q2dd,
+                tau=tau, tau_in=tau_in, tau_c=tau_c, tau_g=tau_g,
+                P=P, Ereg=Ereg)
+
+# -----------------------------
+# 5) Build A→B→C trajectory (STOP at B)
+# -----------------------------
+t_ab, x_ab, y_ab, q1_ab, q2_ab = make_task_segment(A, B, T_AB, dt, elbow_down=True)
+t_bc, x_bc, y_bc, q1_bc, q2_bc = make_task_segment(B, C, T_BC, dt, elbow_down=True)
+
+# Concatenate (avoid duplicate at B)
+t = np.concatenate([t_ab, t_bc[1:] + t_ab[-1]])
+q1 = np.concatenate([q1_ab, q1_bc[1:]])
+q2 = np.concatenate([q2_ab, q2_bc[1:]])
+
+dyn = compute_torque_power(t, q1, q2)
+
+# -----------------------------
+# 6) Plot results
+# -----------------------------
+plt.figure(figsize=(10,4))
+plt.plot(t, dyn["tau"][:,0], label="τ1")
+plt.plot(t, dyn["tau"][:,1], label="τ2")
+plt.axhline(0, linewidth=1)
+plt.grid(True); plt.legend()
+plt.title("Joint Torques (A→B 2s + B→C 3s)")
+plt.xlabel("Time (s)"); plt.ylabel("Torque (N·m)")
+plt.show()
+
+plt.figure(figsize=(10,4))
+plt.plot(t, dyn["P"][:,0], label="P1 = τ1·q̇1")
+plt.plot(t, dyn["P"][:,1], label="P2 = τ2·q̇2")
+plt.axhline(0, linewidth=1)
+plt.grid(True); plt.legend()
+plt.title("Mechanical Power (A→B 2s + B→C 3s)")
+plt.xlabel("Time (s)"); plt.ylabel("Power (W)")
+plt.show()
+
+plt.figure(figsize=(10,4))
+plt.plot(t, dyn["Ereg"][:,0], label="E_reg1")
+plt.plot(t, dyn["Ereg"][:,1], label="E_reg2")
+plt.grid(True); plt.legend()
+plt.title("Cumulative Regen-capable Mechanical Energy")
+plt.xlabel("Time (s)"); plt.ylabel("Energy (J)")
+plt.show()
+
+# -----------------------------
+# 7) Print key numbers
+# -----------------------------
+dt_ = t[1]-t[0]
+P = dyn["P"]
+Epos = np.sum(np.maximum(P,0), axis=0)*dt_
+Eneg = -np.sum(np.minimum(P,0), axis=0)*dt_
+print("Peak power (W) [joint1, joint2]:", np.max(P, axis=0))
+print("Min  power (W) [joint1, joint2]:", np.min(P, axis=0))
+print("Positive mechanical energy (J) [joint1, joint2]:", Epos)
+print("Regen-capable energy (J) [joint1, joint2]:", Eneg)
