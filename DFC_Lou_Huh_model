@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import colors
+#sheet material : AA2024-T351
 
 # ============================================================
 # 0) Model: epsilon_f(eta, L)
