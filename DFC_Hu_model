@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import colors
+#Hu et al. Eur. J. Mech. A Solids 2017, 66, 370-86
 #sheet material : AA2024-T351
 
 # ============================================================
