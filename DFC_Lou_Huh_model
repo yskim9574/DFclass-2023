@@ -1,0 +1,192 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import colors
+
+# ============================================================
+# 0) Model: epsilon_f(eta, L)
+# ============================================================
+def epsilon_f(eta, L):
+    """
+    epsilon_f(eta, L) = 0.361 / [ (2/sqrt(L^2+3))^5.099 + (eta-0.33) ]^0.725
+    NOTE: base must be > 0 to be real-valued.
+    """
+    s = 2.0 / np.sqrt(L**2 + 3.0)
+    base = (s**5.099 + (eta - 0.33))
+    return np.where(base > 0, 0.361 / (base**0.725), np.nan)
+
+# ============================================================
+# 1) Mapping L -> theta -> bar_theta
+#    tan(theta) = sqrt(3)*(L+1)/(3-L)
+#    bar_theta = 1 - (6/pi)*theta
+# ============================================================
+def theta_from_L(L):
+    return np.arctan(np.sqrt(3.0) * (L + 1.0) / (3.0 - L))
+
+def bar_theta_from_L(L):
+    return 1.0 - (6.0/np.pi) * theta_from_L(L)
+
+# ============================================================
+# 2) Von Mises eq stress and Lode parameter (sorted principal stresses)
+#    L = (2*s2 - s1 - s3) / (s1 - s3), with s1>=s2>=s3
+# ============================================================
+def sigma_eq_vm(s1, s2, s3):
+    return np.sqrt(((s1 - s2)**2 + (s2 - s3)**2 + (s3 - s1)**2) / 2.0)
+
+def lode_L_sorted(s1, s2, s3):
+    return (2*s2 - s1 - s3) / (s1 - s3)
+
+# ============================================================
+# 3) Build 3D fracture surface: (bar_theta, eta) -> epsilon_f
+# ============================================================
+def make_fracture_surface(eta_min=-0.33, eta_max=0.66, n_eta=35,
+                          L_min=-1.0, L_max=1.0, n_L=35):
+    eta_grid = np.linspace(eta_min, eta_max, n_eta)
+    L_grid   = np.linspace(L_min, L_max, n_L)
+
+    ETA, LODE = np.meshgrid(eta_grid, L_grid)
+    BT  = bar_theta_from_L(LODE)
+    EPS = epsilon_f(ETA, LODE)
+    return BT, ETA, EPS
+
+# ============================================================
+# 4) Loading paths on the surface
+#    (A) sigma_3=0, sigma_2=k*sigma_1, k in [-1,1]
+#    (B) sigma_2=0, sigma_3=-k*sigma_1, k in [0,Kmax] (compression side to eta~ -1/3)
+#    -> principal stress re-sorting included
+# ============================================================
+def path_sigma3_zero(kmin=-1.0, kmax=1.0, n=2000):
+    k = np.linspace(kmin, kmax, n)
+    # raw principal triplet: (s1, s2, s3) = (1, k, 0)
+    S = np.vstack([np.ones_like(k), k, np.zeros_like(k)]).T
+    # sort to enforce s1>=s2>=s3 for L definition
+    Ss = np.sort(S, axis=1)[:, ::-1]
+    s1, s2, s3 = Ss[:,0], Ss[:,1], Ss[:,2]
+
+    eta = (s1 + s2 + s3) / (3.0 * sigma_eq_vm(s1, s2, s3))
+    L   = lode_L_sorted(s1, s2, s3)
+    bt  = bar_theta_from_L(L)
+    eps = epsilon_f(eta, L)
+    return bt, eta, eps
+
+def path_sigma2_zero(Kmax=80.0, n=5000):
+    k = np.linspace(0.0, Kmax, n)
+    # raw principal triplet: (s1, s2, s3) = (1, 0, -k)
+    S = np.vstack([np.ones_like(k), np.zeros_like(k), -k]).T
+    Ss = np.sort(S, axis=1)[:, ::-1]
+    s1, s2, s3 = Ss[:,0], Ss[:,1], Ss[:,2]
+
+    eta = (s1 + s2 + s3) / (3.0 * sigma_eq_vm(s1, s2, s3))
+    L   = lode_L_sorted(s1, s2, s3)
+    bt  = bar_theta_from_L(L)
+    eps = epsilon_f(eta, L)
+    return bt, eta, eps
+
+# ============================================================
+# 5) Plot (A) 3D surface with paths
+# ============================================================
+def plot_3d_surface_with_paths(eps_zmax=2.0):
+    BT, ETA, EPS = make_fracture_surface(n_eta=35, n_L=35)
+
+    fig = plt.figure(figsize=(9, 5))
+    ax = fig.add_subplot(111, projection="3d")
+
+    norm = colors.Normalize(vmin=0.0, vmax=eps_zmax)
+    surf = ax.plot_surface(
+        BT, ETA, EPS,
+        cmap="viridis",
+        norm=norm,
+        linewidth=0.8,
+        edgecolor="k",
+        alpha=0.55,
+        antialiased=True,
+        zorder=1
+    )
+
+    # paths
+    bt1, eta1, eps1 = path_sigma3_zero(-1, 1, 3000)
+    bt2, eta2, eps2 = path_sigma2_zero(Kmax=80, n=8000)
+
+    # mask to plotting window
+    m1 = np.isfinite(eps1) & (eta1 >= -0.33) & (eta1 <= 0.66)
+    m2 = np.isfinite(eps2) & (eta2 >= -0.33) & (eta2 <= 0.66)
+
+    # blue dashed (sigma3=0)
+    ax.plot(bt1[m1], eta1[m1], eps1[m1],
+            color="deepskyblue", linestyle="--", linewidth=4.5, zorder=30,
+            label=r"$\sigma_3=0,\ \sigma_2=k\sigma_1$")
+
+    # white solid with black outline (sigma2=0)
+    ax.plot(bt2[m2], eta2[m2], eps2[m2],
+            color="black", linewidth=9.0, zorder=34)
+    ax.plot(bt2[m2], eta2[m2], eps2[m2],
+            color="white", linewidth=6.5, zorder=35,
+            label=r"$\sigma_2=0,\ \sigma_3=-k\sigma_1$")
+
+    # axes
+    ax.set_xlabel(r"$\bar{\theta}$")
+    ax.set_ylabel(r"Stress triaxiality $\eta$")
+    ax.set_zlabel(r"$\varepsilon_f$")
+
+    ax.set_ylim(0.66, -0.33)    # reverse eta axis to match paper-style view
+    ax.set_zlim(0, eps_zmax)
+    ax.view_init(elev=28, azim=-55)
+
+    ax.legend(loc="upper left", fontsize=10)
+    cbar = fig.colorbar(surf, ax=ax, shrink=0.55, aspect=12, label=r"$\varepsilon_f$")
+    cbar.set_ticks(np.linspace(0, eps_zmax, 5))
+
+    plt.tight_layout()
+    plt.show()
+
+# ============================================================
+# 6) Plot (B) 2D projection: epsilon_f - eta
+# ============================================================
+def plot_2d_projection_eps_eta(eps_ymax=1.0):
+    _, eta1, eps1 = path_sigma3_zero(-1, 1, 4000)
+    _, eta2, eps2 = path_sigma2_zero(Kmax=80, n=12000)
+
+    m1 = np.isfinite(eps1) & (eta1 >= -0.33) & (eta1 <= 0.66)
+    m2 = np.isfinite(eps2) & (eta2 >= -0.33) & (eta2 <= 0.66)
+
+    eta1p, eps1p = eta1[m1], eps1[m1]
+    eta2p, eps2p = eta2[m2], eps2[m2]
+
+    # sort by eta for clean curves
+    i1 = np.argsort(eta1p); eta1p, eps1p = eta1p[i1], eps1p[i1]
+    i2 = np.argsort(eta2p); eta2p, eps2p = eta2p[i2], eps2p[i2]
+
+    plt.figure(figsize=(7,5))
+    plt.plot(eta1p, eps1p, linestyle="--", linewidth=2.5,
+             label=r"$\sigma_3=0,\ \sigma_2=k\sigma_1,\ k\in[-1,1]$")
+    plt.plot(eta2p, eps2p, linestyle="-", linewidth=2.8,
+             label=r"$\sigma_2=0,\ \sigma_3=-k\sigma_1,\ k\in[0,80]$")
+
+    # reference stress states
+    refs = {
+        r"$\eta=-2/3$ (equi-biaxial comp.)": -2/3,
+        r"$\eta=-1/3$ (uniaxial comp.)": -1/3,
+        r"$\eta=0$ (shear)": 0.0,
+        r"$\eta=1/3$ (uniaxial tension)": 1/3,
+        r"$\eta=1/\sqrt{3}$ (plane strain)": 1/np.sqrt(3),
+        r"$\eta=2/3$ (equi-biaxial tension)": 2/3
+    }
+    for label, x in refs.items():
+        plt.axvline(x, color="gray", linestyle=":", linewidth=1)
+        plt.text(x, eps_ymax*0.98, label, ha="center", va="top",
+                 fontsize=9, rotation=90)
+
+    plt.xlim(-0.75, 0.75)
+    plt.ylim(0.0, eps_ymax)
+    plt.xlabel(r"Stress triaxiality, $\eta$")
+    plt.ylabel(r"Equivalent plastic strain to fracture, $\varepsilon_f$")
+    plt.title(r"2D projection on the $\varepsilon_f$–$\eta$ plane")
+    plt.grid(True, alpha=0.35)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+# ============================================================
+# 7) Run demo
+# ============================================================
+plot_3d_surface_with_paths(eps_zmax=2.0)   # 3D surface + paths
+plot_2d_projection_eps_eta(eps_ymax=1.0)   # 2D eps-eta projection
