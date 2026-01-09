@@ -1,0 +1,220 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import colors
+
+# ============================================================
+# 0) Given constants (Hu model parameters)
+# ============================================================
+C1 = 0.4285
+C2 = 0.4377
+C3 = 5.3161
+
+# ============================================================
+# 1) L(=mu) -> theta -> bar_theta
+#    tan(theta) = sqrt(3)*(L+1)/(3-L)
+#    bar_theta  = 1 - (6/pi)*theta
+# ============================================================
+def theta_from_L(L):
+    return np.arctan(np.sqrt(3.0) * (L + 1.0) / (3.0 - L))
+
+def bar_theta_from_L(L):
+    return 1.0 - (6.0 / np.pi) * theta_from_L(L)
+
+# ============================================================
+# 2) Hu model epsilon_f(mu, eta) (vectorized)
+# ============================================================
+def epsilon_f(mu, eta, eps_cap=None):
+    """
+    mu is treated as L (Lode parameter-like)
+    eta is stress triaxiality
+    """
+    A = np.sqrt(mu**2 + 3.0)
+
+    term1 = eta + (3.0 - mu) / (3.0 * A) + (1.0 / A)
+    term2 = ((3.0 + np.sqrt(3.0) * C3) / A - C3)
+
+    denom = (term1 ** C2) * term2
+
+    # valid only when denom > 0 (avoid div-by-zero / sign issues)
+    eps = np.where((A > 0) & np.isfinite(denom) & (denom > 1e-12), C1 / denom, np.nan)
+
+    # optional cap for readability
+    if eps_cap is not None:
+        eps = np.clip(eps, 0, eps_cap)
+    return eps
+
+# ============================================================
+# 3) Stress measures for loading paths (principal re-sorting)
+#    eta = sigma_m / sigma_eq(von Mises)
+#    L   = (2*s2 - s1 - s3)/(s1 - s3), with s1>=s2>=s3
+# ============================================================
+def sigma_eq_vm(s1, s2, s3):
+    return np.sqrt(((s1 - s2)**2 + (s2 - s3)**2 + (s3 - s1)**2) / 2.0)
+
+def lode_L_sorted(s1, s2, s3):
+    return (2*s2 - s1 - s3) / (s1 - s3)
+
+# ============================================================
+# 4) Loading paths (with principal stress re-sorting)
+#    (A) sigma3=0, sigma2=k*sigma1, k in [-1,1]
+#    (B) sigma2=0, sigma3=-k*sigma1, k in [0,Kmax]
+# ============================================================
+def path_sigma3_zero(kmin=-1.0, kmax=1.0, n=8000, eps_cap=None):
+    k = np.linspace(kmin, kmax, n)
+    # raw: (s1,s2,s3)=(1,k,0)
+    S = np.vstack([np.ones_like(k), k, np.zeros_like(k)]).T
+    Ss = np.sort(S, axis=1)[:, ::-1]  # enforce s1>=s2>=s3
+    s1, s2, s3 = Ss[:,0], Ss[:,1], Ss[:,2]
+
+    eta = (s1 + s2 + s3) / (3.0 * sigma_eq_vm(s1, s2, s3))
+    L   = lode_L_sorted(s1, s2, s3)
+    bt  = bar_theta_from_L(L)
+    eps = epsilon_f(L, eta, eps_cap=eps_cap)   # mu = L
+    return bt, eta, eps, L
+
+def path_sigma2_zero(Kmax=200.0, n=35000, eps_cap=None):
+    k = np.linspace(0.0, Kmax, n)
+    # raw: (s1,s2,s3)=(1,0,-k)
+    S = np.vstack([np.ones_like(k), np.zeros_like(k), -k]).T
+    Ss = np.sort(S, axis=1)[:, ::-1]
+    s1, s2, s3 = Ss[:,0], Ss[:,1], Ss[:,2]
+
+    eta = (s1 + s2 + s3) / (3.0 * sigma_eq_vm(s1, s2, s3))
+    L   = lode_L_sorted(s1, s2, s3)
+    bt  = bar_theta_from_L(L)
+    eps = epsilon_f(L, eta, eps_cap=eps_cap)   # mu = L
+    return bt, eta, eps, L
+
+# ============================================================
+# 5) Plot 3D surface (bar_theta, eta, eps) and overlay paths
+# ============================================================
+def plot_3d_surface_with_paths(
+    eta_min=-0.33, eta_max=0.66,
+    mu_min=-1.0, mu_max=1.0,
+    eps_zmax=2.0
+):
+    # ---- build surface grid in (mu=L, eta), then map to bar_theta ----
+    mu_vals  = np.linspace(mu_min, mu_max, 45)
+    eta_vals = np.linspace(eta_min, eta_max, 45)
+    MU, ETA  = np.meshgrid(mu_vals, eta_vals)
+
+    BT  = bar_theta_from_L(MU)
+    EPS = epsilon_f(MU, ETA, eps_cap=eps_zmax)
+
+    # ---- plot surface ----
+    fig = plt.figure(figsize=(11, 7.5))
+    ax = fig.add_subplot(111, projection='3d')
+
+    norm = colors.Normalize(vmin=0.0, vmax=eps_zmax)
+    surf = ax.plot_surface(
+        BT, ETA, EPS,
+        cmap="viridis",
+        norm=norm,
+        linewidth=0.75,
+        edgecolor="k",
+        alpha=0.55,
+        antialiased=True
+    )
+
+    # ---- compute paths ----
+    bt1, eta1, eps1, L1 = path_sigma3_zero(-1, 1, n=8000, eps_cap=eps_zmax)
+    bt2, eta2, eps2, L2 = path_sigma2_zero(Kmax=200, n=35000, eps_cap=eps_zmax)
+
+    # ---- KEY FIX: Clip path points to SURFACE domain ----
+    m1 = (np.isfinite(eps1) &
+          (eta1 >= eta_min) & (eta1 <= eta_max) &
+          (L1  >= mu_min)  & (L1  <= mu_max))
+
+    m2 = (np.isfinite(eps2) &
+          (eta2 >= eta_min) & (eta2 <= eta_max) &
+          (L2  >= mu_min)  & (L2  <= mu_max))
+
+    # ---- overlay paths ----
+    ax.plot(bt1[m1], eta1[m1], eps1[m1],
+            color="deepskyblue", linestyle="--", linewidth=4.5,
+            label=r"$\sigma_3=0,\ \sigma_2=k\sigma_1$")
+
+    # sigma2=0 path: WHITE (as requested), with black outline for visibility
+    ax.plot(bt2[m2], eta2[m2], eps2[m2], color="black", linewidth=10.0)
+    ax.plot(bt2[m2], eta2[m2], eps2[m2],
+            color="white", linewidth=7.5,
+            label=r"$\sigma_2=0,\ \sigma_3=-k\sigma_1$")
+
+    # ---- axes ----
+    ax.set_xlabel(r"$\bar{\theta}$")
+    ax.set_ylabel(r"Stress triaxiality $\eta$")
+    ax.set_zlabel(r"$\varepsilon_f$")
+
+    # paper-like direction: front 0.66 -> back -0.33
+    ax.set_ylim(eta_max, eta_min)
+    ax.set_zlim(0, eps_zmax)
+    ax.view_init(elev=28, azim=-55)
+
+    ax.set_title("Hung-Kim model: 3D surface in (bar θ, η) with clipped paths (L∈[-1,1])")
+    ax.legend(loc="upper left", fontsize=10)
+
+    cbar = fig.colorbar(surf, ax=ax, shrink=0.55, aspect=12, label=r"$\varepsilon_f$")
+    cbar.set_ticks([0, 0.5, 1.0, 1.5, 2.0])
+
+    plt.tight_layout()
+    plt.show()
+
+    # return paths for 2D projection (optional)
+    return (eta1[m1], eps1[m1]), (eta2[m2], eps2[m2])
+
+# ============================================================
+# 6) Plot 2D projection: epsilon_f - eta (auto)
+# ============================================================
+def plot_2d_projection_eps_eta(curve1, curve2, eps_ymax=1.0):
+    """
+    curve1, curve2: tuples (eta_array, eps_array) already clipped.
+    """
+    eta1, eps1 = curve1
+    eta2, eps2 = curve2
+
+    # sort by eta for clean curves
+    i1 = np.argsort(eta1)
+    i2 = np.argsort(eta2)
+    eta1, eps1 = eta1[i1], eps1[i1]
+    eta2, eps2 = eta2[i2], eps2[i2]
+
+    plt.figure(figsize=(7,5.5))
+    plt.plot(eta1, eps1, "--", linewidth=2.5, color="deepskyblue",
+             label=r"$\sigma_3=0,\ \sigma_2=k\sigma_1$")
+    plt.plot(eta2, eps2, "-", linewidth=2.8, color="black",
+             label=r"$\sigma_2=0,\ \sigma_3=-k\sigma_1$")
+
+    # regime markers (paper-style)
+    refs = {
+        r"$\eta=-2/3$ (equi-biaxial comp.)": -2/3,
+        r"$\eta=-1/3$ (uniaxial comp.)": -1/3,
+        r"$\eta=0$ (shear)": 0.0,
+        r"$\eta=1/3$ (uniaxial tension)": 1/3,
+        r"$\eta=1/\sqrt{3}$ (plane strain)": 1/np.sqrt(3),
+        r"$\eta=2/3$ (equi-biaxial tension)": 2/3
+    }
+    for label, x in refs.items():
+        plt.axvline(x, color="gray", linestyle=":", linewidth=1)
+        plt.text(x, eps_ymax*0.98, label, ha="center", va="top",
+                 fontsize=9, rotation=90)
+
+    plt.xlim(-0.75, 0.75)
+    plt.ylim(0.0, eps_ymax)
+    plt.xlabel(r"Stress triaxiality, $\eta$")
+    plt.ylabel(r"Equivalent plastic strain to fracture, $\varepsilon_f$")
+    plt.title(r"2D projection on the $\varepsilon_f$–$\eta$ plane (Hung-Kim model)")
+    plt.grid(True, alpha=0.35)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+# ============================================================
+# 7) RUN (자동으로 3D + 2D 모두 출력)
+# ============================================================
+curve_sigma3, curve_sigma2 = plot_3d_surface_with_paths(
+    eta_min=-0.33, eta_max=0.66,
+    mu_min=-1.0, mu_max=1.0,
+    eps_zmax=2.0
+)
+
+plot_2d_projection_eps_eta(curve_sigma3, curve_sigma2, eps_ymax=1.0)
