@@ -1,0 +1,122 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ----------------------------
+# Gurson yield function (original Gurson; q1=q2=q3=1)
+# Plane stress: sigma3 = 0
+# Stresses are nondimensionalized by sigma_y (set sigma_y = 1)
+# ----------------------------
+
+def mises_eq(s1, s2, s3=0.0):
+    """von Mises equivalent stress from principal stresses."""
+    return np.sqrt(((s1 - s2)**2 + (s2 - s3)**2 + (s3 - s1)**2) / 2.0)
+
+def mean_stress(s1, s2, s3=0.0):
+    """hydrostatic mean stress."""
+    return (s1 + s2 + s3) / 3.0
+
+def gurson_phi(s1, s2, f, s3=0.0, sigma_y=1.0):
+    """Original Gurson yield function value Phi(s1,s2)=0 on yield surface."""
+    seq = mises_eq(s1, s2, s3)
+    sm  = mean_stress(s1, s2, s3)
+    return (seq / sigma_y)**2 + 2.0 * f * np.cosh(3.0 * sm / (2.0 * sigma_y)) - (1.0 + f**2)
+
+def brentq_root(fun, a, b, max_iter=80, tol=1e-10):
+    """
+    Simple Brent-like bisection (robust) root finder on [a,b] with sign change.
+    (Pure bisection for reliability.)
+    """
+    fa = fun(a)
+    fb = fun(b)
+    if fa * fb > 0:
+        return None
+
+    lo, hi = a, b
+    flo, fhi = fa, fb
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        fmid = fun(mid)
+        if abs(fmid) < tol or (hi - lo) < tol:
+            return mid
+        # keep bracket
+        if flo * fmid <= 0:
+            hi, fhi = mid, fmid
+        else:
+            lo, flo = mid, fmid
+    return 0.5 * (lo + hi)
+
+def yield_locus_gurson(f, n_theta=721, sigma_y=1.0, r_max=5.0):
+    """
+    Compute yield locus in sigma1-sigma2 plane by polar sweep:
+    sigma1 = r cos(theta), sigma2 = r sin(theta), sigma3=0
+    Find r>0 such that Phi=0.
+    """
+    thetas = np.linspace(0, 2*np.pi, n_theta, endpoint=False)
+    s1_list, s2_list = [], []
+
+    for th in thetas:
+        c, s = np.cos(th), np.sin(th)
+
+        # define Phi along ray r
+        def phi_r(r):
+            s1 = r * c * sigma_y
+            s2 = r * s * sigma_y
+            return gurson_phi(s1, s2, f=f, s3=0.0, sigma_y=sigma_y)
+
+        # At r=0: Phi = 2f - (1+f^2) = -(1-f)^2 <= 0 (for f in [0,1])
+        # Need find r where Phi crosses 0.
+        r0 = 0.0
+        phi0 = phi_r(r0)
+
+        # Scan to find a bracket [ra, rb] where Phi changes sign
+        rb = None
+        ra = 0.0
+        phi_a = phi0
+
+        # adaptive scan
+        # start small, grow until r_max
+        for r_try in np.linspace(1e-6, r_max, 120):
+            phi_b = phi_r(r_try)
+            if phi_a * phi_b <= 0:
+                rb = r_try
+                break
+            ra = r_try
+            phi_a = phi_b
+
+        if rb is None:
+            # no intersection found on this ray; skip
+            continue
+
+        r_star = brentq_root(phi_r, ra, rb)
+        if r_star is None:
+            continue
+
+        s1_list.append(r_star * np.cos(th))  # nondimensional: /sigma_y
+        s2_list.append(r_star * np.sin(th))
+
+    return np.array(s1_list), np.array(s2_list)
+
+# ----------------------------
+# Plot
+# ----------------------------
+f_list = [0.0, 0.05, 0.1]
+styles = ["-", "--", "-."]
+
+plt.figure(figsize=(5.2, 5.2))
+for f, ls in zip(f_list, styles):
+    s1_nd, s2_nd = yield_locus_gurson(f=f, n_theta=900, sigma_y=1.0, r_max=6.0)
+    plt.plot(s1_nd, s2_nd, ls, linewidth=2.0, label=f"$C_v=f={f}$")
+
+# axes
+plt.axhline(0, linewidth=1.0)
+plt.axvline(0, linewidth=1.0)
+plt.gca().set_aspect("equal", adjustable="box")
+
+plt.xlabel(r"$\sigma_1/\sigma_y$")
+plt.ylabel(r"$\sigma_2/\sigma_y$")
+plt.xlim(-1.6, 1.6)
+plt.ylim(-1.6, 1.6)
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.title("Gurson yield locus in $\sigma_1$-$\sigma_2$ plane (plane stress: $\sigma_3=0$)")
+plt.show()
