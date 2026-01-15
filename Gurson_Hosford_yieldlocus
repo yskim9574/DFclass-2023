@@ -102,7 +102,7 @@ styles  = ["-", "--", "-."]
 plt.figure(figsize=(5.2, 5.2))
 for Cv, ls in zip(Cv_list, styles):
     x, y = yield_locus_gurson_hosford(f=Cv, a_h=8, n_theta=1000, sigma_y=1.0, r_max=10.0)
-    plt.plot(x, y, ls, linewidth=2.0, label=f"$C_v=f={Cv}$")
+    plt.plot(x, y, ls, linewidth=2.0, label=f"$C_v={Cv}$")
 
 plt.rcParams.update({
     "font.size": 14,
