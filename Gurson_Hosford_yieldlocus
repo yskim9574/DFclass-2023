@@ -1,0 +1,125 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ----------------------------
+# Gurson yield function with Hosford equivalent stress
+# Plane stress: sigma3 = 0
+# Nondimensionalization: sigma_y = 1
+# ----------------------------
+
+def mean_stress(s1, s2, s3=0.0):
+    return (s1 + s2 + s3) / 3.0
+
+def hosford_eq(s1, s2, s3=0.0, a=8):
+    """
+    User-defined Hosford equivalent stress:
+    (sigma_eq)^a = |s1-s2|^a + |s2-s3|^a + |s3-s1|^a
+    => sigma_eq = [ ... ]^(1/a)
+    """
+    term = (np.abs(s1 - s2) ** a +
+            np.abs(s2 - s3) ** a +
+            np.abs(s3 - s1) ** a)
+    return term ** (1.0 / a)
+
+def gurson_phi_hosford(s1, s2, f, s3=0.0, sigma_y=1.0, a=8):
+    """
+    Gurson (original) yield function:
+      Phi = (sigma_eq/sigma_y)^2 + 2 f cosh(3 sigma_m / (2 sigma_y)) - (1 + f^2) = 0
+    where sigma_eq is Hosford equivalent stress (a=8).
+    """
+    seq = hosford_eq(s1, s2, s3, a=a)
+    sm  = mean_stress(s1, s2, s3)
+    return (seq / sigma_y) ** 2 + 2.0 * f * np.cosh(3.0 * sm / (2.0 * sigma_y)) - (1.0 + f**2)
+
+def bisection_root(fun, a, b, max_iter=80, tol=1e-10):
+    fa, fb = fun(a), fun(b)
+    if fa * fb > 0:
+        return None
+    lo, hi = a, b
+    flo, fhi = fa, fb
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        fmid = fun(mid)
+        if abs(fmid) < tol or (hi - lo) < tol:
+            return mid
+        if flo * fmid <= 0:
+            hi, fhi = mid, fmid
+        else:
+            lo, flo = mid, fmid
+    return 0.5 * (lo + hi)
+
+def yield_locus_gurson_hosford(f, a_h=8, n_theta=900, sigma_y=1.0, r_max=8.0):
+    """
+    Polar sweep in sigma1-sigma2 plane:
+      sigma1 = r cos(theta), sigma2 = r sin(theta), sigma3=0
+    Find r where Phi=0.
+    """
+    thetas = np.linspace(0, 2*np.pi, n_theta, endpoint=False)
+    s1_nd, s2_nd = [], []
+
+    for th in thetas:
+        c, s = np.cos(th), np.sin(th)
+
+        def phi_r(r_nd):
+            # dimensional stresses = r_nd * sigma_y
+            s1 = (r_nd * c) * sigma_y
+            s2 = (r_nd * s) * sigma_y
+            return gurson_phi_hosford(s1, s2, f=f, s3=0.0, sigma_y=sigma_y, a=a_h)
+
+        # Phi(0) = 2f - (1+f^2) = -(1-f)^2 <= 0
+        phi0 = phi_r(0.0)
+
+        # scan to find sign change
+        ra = 0.0
+        phi_a = phi0
+        rb = None
+
+        for r_try in np.linspace(1e-6, r_max, 160):
+            phi_b = phi_r(r_try)
+            if phi_a * phi_b <= 0:
+                rb = r_try
+                break
+            ra, phi_a = r_try, phi_b
+
+        if rb is None:
+            continue
+
+        r_star = bisection_root(phi_r, ra, rb)
+        if r_star is None:
+            continue
+
+        s1_nd.append(r_star * c)  # already nondimensional
+        s2_nd.append(r_star * s)
+
+    return np.array(s1_nd), np.array(s2_nd)
+
+# ----------------------------
+# Plot: Cv = 0.0, 0.05, 0.1
+# ----------------------------
+Cv_list = [0.0, 0.1,  0.2]
+styles  = ["-", "--", "-."]
+
+plt.figure(figsize=(5.2, 5.2))
+for Cv, ls in zip(Cv_list, styles):
+    x, y = yield_locus_gurson_hosford(f=Cv, a_h=8, n_theta=1000, sigma_y=1.0, r_max=10.0)
+    plt.plot(x, y, ls, linewidth=2.0, label=f"$C_v=f={Cv}$")
+
+plt.rcParams.update({
+    "font.size": 14,
+    "axes.labelsize": 14,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "legend.fontsize": 14,
+    "axes.titlesize":12
+})
+plt.axhline(0, linewidth=1.0)
+plt.axvline(0, linewidth=1.0)
+plt.gca().set_aspect("equal", adjustable="box")
+plt.xlabel(r"$\sigma_1/\sigma_y$")
+plt.ylabel(r"$\sigma_2/\sigma_y$")
+plt.xlim(-1.6, 1.6)
+plt.ylim(-1.6, 1.6)
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.title(r"Gurson yield locus with Hosford($a=8$), plane stress ($\sigma_3=0$)")
+plt.show()
