@@ -1,0 +1,117 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.lines as mlines # Import mlines for proxy artist
+
+# ----------------------------
+# plane stress: sigma3 = 0
+# ----------------------------
+def mean_stress(s1, s2, s3=0.0):
+    return (s1 + s2 + s3) / 3.0
+
+def deviatoric_principal(s1, s2, s3=0.0):
+    sm = mean_stress(s1, s2, s3)
+    return s1 - sm, s2 - sm, s3 - sm
+
+def J2_J3_dev(s1, s2, s3=0.0):
+    """
+    Deviatoric invariants:
+      J2 = 1/2 * sum(si^2)
+      J3 = s1*s2*s3
+    where si are deviatoric principal stresses.
+    """
+    d1, d2, d3 = deviatoric_principal(s1, s2, s3)
+    J2 = 0.5 * (d1**2 + d2**2 + d3**2)
+    J3 = d1 * d2 * d3
+    return J2, J3
+
+def kim_van_sigma_eq(s1, s2, alpha, beta, s3=0.0, use_abs=False):
+    """
+    Kim–Van equivalent stress:
+      ((1/sqrt(3))*seq)^6 = (J2)^3 + alpha*(J3)^2 + beta*(J2)^(3/2)*J3
+
+    If use_abs=True:
+      RHS = |J2|^3 + alpha*|J3|^2 + beta*|J2|^(3/2)*|J3|
+      then clamp to >=0 for numerical safety.
+    """
+    J2, J3 = J2_J3_dev(s1, s2, s3)
+
+    if use_abs:
+        rhs = (np.abs(J2)**3
+               + alpha * (np.abs(J3)**2)
+               + beta  * (np.abs(J2)**1.5) * np.abs(J3))
+        rhs = np.maximum(rhs, 0.0)
+    else:
+        rhs = (J2**3
+               + alpha * (J3**2)
+               + beta  * (np.maximum(J2, 0.0)**1.5) * J3)  # J2>=0 for deviatoric J2
+        # rhs may be negative depending on alpha,beta; clamp for real seq:
+        rhs = np.maximum(rhs, 0.0)
+
+    seq = np.sqrt(3.0) * (rhs ** (1.0 / 6.0))
+    return seq
+
+def gurson_phi(s1, s2, f, sigma_y, alpha, beta, s3=0.0, use_abs=False):
+    """
+    Original Gurson:
+      Phi = (seq/sigma_y)^2 + 2 f cosh( 3 sm / (2 sigma_y) ) - (1 + f^2)
+    """
+    sm  = mean_stress(s1, s2, s3)
+    seq = kim_van_sigma_eq(s1, s2, alpha, beta, s3=s3, use_abs=use_abs)
+    return (seq / sigma_y)**2 + 2.0*f*np.cosh(3.0*sm/(2.0*sigma_y)) - (1.0 + f**2)
+
+# ----------------------------------------------------
+# Plot settings
+# ----------------------------------------------------
+sigma_y = 10.0          # MPa (Kim–Van 단독 k=10과 비슷한 스케일)
+alpha   = 2.0
+beta    =  0.0
+use_abs = False         # 첨부 그림처럼 "형상이 확 바뀌는" 효과를 보려면 False 권장
+                         # (단, NaN 방지 위해 rhs clamp는 최소로 들어가 있음)
+
+f_list  = [0.0, 0.1, 0.2]   # porosity Cv=f
+styles  = ["-", "--", "-."]
+
+# grid for contour
+smin, smax, n = -20.0, 20.0, 501
+s1 = np.linspace(smin, smax, n)
+s2 = np.linspace(smin, smax, n)
+S1, S2 = np.meshgrid(s1, s2)
+
+plt.figure(figsize=(5,5))
+
+# Create a list to hold proxy artists for the legend
+proxy_artists = []
+
+# Get the default color cycle so that contour lines and proxy artists match
+prop_cycle = plt.rcParams['axes.prop_cycle']
+colors = [c['color'] for c in list(prop_cycle)]
+
+for i, (f, ls) in enumerate(zip(f_list, styles)):
+    Phi = gurson_phi(S1, S2, f=f, sigma_y=sigma_y, alpha=alpha, beta=beta, s3=0.0, use_abs=use_abs)
+    # 0-level set
+    # Explicitly set color for contour to match the proxy artist for the legend
+    plt.contour(S1/sigma_y, S2/sigma_y, Phi, levels=[0], linestyles=ls, linewidths=2.2, colors=[colors[i % len(colors)]])
+
+    # Create a proxy artist for the legend entry for this contour
+    proxy_artists.append(mlines.Line2D([], [], color=colors[i % len(colors)], linestyle=ls, linewidth=2.2, label=f"$C_v=f={f}$"))
+
+plt.axhline(0, linewidth=1)
+plt.axvline(0, linewidth=1)
+plt.gca().set_aspect("equal", adjustable="box")
+plt.grid(True, linestyle=":", linewidth=0.6)
+
+plt.xlabel(r"$\sigma_1/\sigma_y$", fontsize=14)
+plt.ylabel(r"$\sigma_2/\sigma_y$", fontsize=14)
+plt.title(rf"Gurson + Kim–Van (plane stress $\sigma_3=0$),  $\alpha={alpha},\ \beta={beta}$", fontsize=12)
+plt.legend(handles=proxy_artists) # Pass the collected proxy artists to legend
+plt.show()
+
+
+plt.rcParams.update({
+    "font.size": 12,
+    "axes.labelsize": 12,
+    "xtick.labelsize": 12,
+    "ytick.labelsize": 12,
+    "legend.fontsize": 10,
+    "axes.titlesize":12
+})
