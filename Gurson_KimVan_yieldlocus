@@ -62,11 +62,11 @@ def gurson_phi(s1, s2, f, sigma_y, alpha, beta, s3=0.0, use_abs=False):
 # ----------------------------------------------------
 # Plot settings
 # ----------------------------------------------------
-sigma_y = 10.0          # MPa (Kim–Van 단독 k=10과 비슷한 스케일)
+sigma_y = 10.0          # MPa 
 alpha   = 2.0
 beta    =  0.0
-use_abs = False         # 첨부 그림처럼 "형상이 확 바뀌는" 효과를 보려면 False 권장
-                         # (단, NaN 방지 위해 rhs clamp는 최소로 들어가 있음)
+use_abs = False         
+                         
 
 f_list  = [0.0, 0.1, 0.2]   # porosity Cv=f
 styles  = ["-", "--", "-."]
@@ -93,7 +93,7 @@ for i, (f, ls) in enumerate(zip(f_list, styles)):
     plt.contour(S1/sigma_y, S2/sigma_y, Phi, levels=[0], linestyles=ls, linewidths=2.2, colors=[colors[i % len(colors)]])
 
     # Create a proxy artist for the legend entry for this contour
-    proxy_artists.append(mlines.Line2D([], [], color=colors[i % len(colors)], linestyle=ls, linewidth=2.2, label=f"$C_v=f={f}$"))
+    proxy_artists.append(mlines.Line2D([], [], color=colors[i % len(colors)], linestyle=ls, linewidth=2.2, label=f"$C_v={f}$"))
 
 plt.axhline(0, linewidth=1)
 plt.axvline(0, linewidth=1)
