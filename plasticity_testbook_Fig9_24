@@ -2,91 +2,83 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize_scalar
 
-# --- Set global font sizes ---
-plt.rcParams['axes.labelsize'] = 14
-plt.rcParams['axes.titlesize'] = 16
-plt.rcParams['xtick.labelsize'] = 12
-plt.rcParams['ytick.labelsize'] = 12
-plt.rcParams['legend.fontsize'] = 12
-plt.rcParams['legend.title_fontsize'] = 13
-
-
 def p1_formula(gamma, h1, h2, alpha_rad, m):
-    """
-    Calculates the dimensionless drawing stress p/(2k).
-    This version uses the denominator with multiplication as requested.
-    """
     epsilon = 1e-9
     gamma = max(gamma, epsilon)
     alpha_rad = max(alpha_rad, epsilon)
-
     if np.abs(np.cos(gamma)) < epsilon or np.abs(np.cos(alpha_rad)) < epsilon:
         return np.inf
+
+#If the cosine of gamma is extremely close to zero, OR if the cosine of alpha_rad is #extremely close to zero, then stop everything and report the result as infinity
+
     if np.abs(np.sin(alpha_rad + gamma)) < epsilon or \
        np.abs(np.sin(gamma)) < epsilon or \
        np.abs(np.sin(alpha_rad)) < epsilon:
         return np.inf
 
-    sin_a = np.sin(alpha_rad)
-    sin_g = np.sin(gamma)
-    tan_a = np.tan(alpha_rad)
-    tan_g = np.tan(gamma)
+    sin_a = np.sin(alpha_rad);   sin_g = np.sin(gamma)
+    tan_a = np.tan(alpha_rad);   tan_g = np.tan(gamma)
 
-    # --- THIS IS THE CORRECTED SECTION BASED ON YOUR LAST MESSAGE ---
     # Numerator of the complex inner term, before squaring
     term2_num_base = (h1 - h2) * tan_g - h2 * tan_a
-
     # Denominator of the complex inner term (using multiplication)
     term2_den = h1 * tan_a**2 * tan_g**2
-
     # Check for division by zero
     if abs(term2_den) < epsilon:
-         return np.inf
+        return np.inf
 
     # The full complex inner term
     term2 = term2_num_base**2 / term2_den
-    # --- END OF CORRECTION ---
-
     # The other terms remain the same
     term3 = h2 / sin_g**2
     term4 = m * (h1 - h2) / sin_a**2
-
     # The leading factor outside the main parenthesis
     factor = sin_a * sin_g / (2 * h2 * np.sin(alpha_rad + gamma))
-
     drawing_stress = factor * (h1 + term2 + term3 + term4)
 
     return drawing_stress
 
 def find_minimum_stress(h1, h2, m, alpha_deg):
-    """
-    Finds the minimum drawing stress for a given die angle by optimizing gamma.
-    """
     alpha_rad = np.deg2rad(alpha_deg)
+#converts an angle from degrees to radians.
     objective_func = lambda gamma: p1_formula(gamma, h1, h2, alpha_rad, m)
     result = minimize_scalar(objective_func, bounds=(1e-6, np.pi/2), method='bounded')
     return result.fun, result.x
+#lambda: This is a Python keyword for creating a small, anonymous (unnamed) function.
+#minimize_scalar: This is the powerful optimization function from the SciPy library. Its job is #to find the minimum value of a single-variable (scalar) function.
 
 # --- Main Program ---
 if __name__ == "__main__":
-    H1 = 1.0
-    M = 0.2
+    H1 = 1.0 ;   M = 0.2
     reduction_ratios = [0.1, 0.2, 0.3, 0.4, 0.5]
     alpha_degrees = np.arange(1, 61)
-
     plt.figure(figsize=(7,5))
 
-    for r in reduction_ratios:
+    # Define line_styles and markers for the plot
+    line_styles = ['-', '--', '-.', ':', (0, (3, 5, 1, 5, 1, 5))] # Example styles
+    markers = ['o', 's', '^', 'D', 'p'] # Example markers
+
+    for i, r in enumerate(reduction_ratios):
         h2 = H1 * (1 - r)
         min_stresses = []
         for alpha_d in alpha_degrees:
             min_p, opt_g = find_minimum_stress(H1, h2, M, alpha_d)
             min_stresses.append(min_p)
-        plt.plot(alpha_degrees, min_stresses, label=f'(h₁-h₂)/h₁ = {r:.1f}')
+
+        plt.plot(
+            alpha_degrees,
+            min_stresses,
+            linestyle=line_styles[i % len(line_styles)],
+            marker=markers[i % len(markers)],
+            markersize=5,
+            markevery=6,   # 마커 밀도 (6~10 추천)
+            linewidth=2,
+            label=f'(h₁-h₂)/h₁ = {r:.1f}'
+        )
 
     plt.title('Dimensionless Drawing Stress vs. Die Half-Angle')
-    plt.xlabel(' (Die Half-Angle α [°])')
-    plt.ylabel('(Dimensionless Drawing Stress p/(2k)')
+    plt.xlabel(' Die Half-Angle α [°]', fontsize=13)
+    plt.ylabel('Dimensionless Drawing Stress p/(2k)', fontsize=13)
     plt.xlim(0, 60)
     plt.ylim(0, 1.0)
     plt.grid(True, linestyle='--', alpha=0.6)
