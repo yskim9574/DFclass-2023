@@ -44,3 +44,4 @@ plt.legend(loc='upper center')
 
 # Display the plot
 plt.show()
+plt.axis('equal')
