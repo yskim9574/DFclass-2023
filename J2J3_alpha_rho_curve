@@ -1,0 +1,158 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ============================================================
+# Kim–Van yield function:
+#   f = J2^3 + A*J3^2 + B*J2^(3/2)*J3 - k^6
+#
+# Associated flow:
+#   dε_i ∝ ∂f/∂σ_i
+#   rho = dε2/dε1 = (∂f/∂σ2)/(∂f/∂σ1)
+#
+# Biaxial tension test style (cruciform):
+#   stress ratio alpha = σ2/σ1 is controlled: alpha from 1.0 -> 0.0
+# Plane stress: σ3 = 0
+# Set σ1=1 (scale cancels) and σ2=alpha
+# ============================================================
+
+def mean_stress(s1, s2, s3=0.0):
+    return (s1 + s2 + s3) / 3.0
+
+def deviatoric_principal(s1, s2, s3=0.0):
+    sm = mean_stress(s1, s2, s3)
+    return s1 - sm, s2 - sm, s3 - sm
+
+def J2_J3(s1, s2, s3=0.0):
+    d1, d2, d3 = deviatoric_principal(s1, s2, s3)
+    J2 = 0.5 * (d1**2 + d2**2 + d3**2)
+    J3 = d1 * d2 * d3
+    return J2, J3, (d1, d2, d3)
+
+# f = J2^3 + A J3^2 + B J2^(3/2) J3 - k^6
+def df_dJ2(J2, J3, B):
+    return 3.0*(J2**2) + 1.5*B*np.sqrt(J2)*J3
+
+def df_dJ3(J2, J3, A, B):
+    return 2.0*A*J3 + B*(J2**1.5)
+
+# Exact derivatives (no division by s_i; safe when s_i=0)
+def dJ2_dsigma(s1, s2, s3, which):
+    # ∂J2/∂σi = s_i (for principal stresses)
+    return s1 if which == 1 else s2
+
+def dJ3_dsigma(s1, s2, s3, which):
+    # J3 = s1*s2*s3, with s_i = σ_i - σ_m, σ_m=(σ1+σ2+σ3)/3
+    if which == 1:   # ∂J3/∂σ1
+        return (2/3)*s2*s3 - (1/3)*s1*s3 - (1/3)*s1*s2
+    else:            # ∂J3/∂σ2
+        return -(1/3)*s2*s3 + (2/3)*s1*s3 - (1/3)*s1*s2
+
+def rho_of_alpha(alpha_stress, A, B):
+    """
+    rho(alpha) = (dε2/dε1) = (df/dσ2)/(df/dσ1)
+    with σ1=1, σ2=alpha, σ3=0 (plane stress).
+    """
+    sig1, sig2, sig3 = 1.0, alpha_stress, 0.0
+    J2v, J3v, (s1, s2, s3d) = J2_J3(sig1, sig2, sig3)
+
+    dfdJ2 = df_dJ2(J2v, J3v, B)
+    dfdJ3 = df_dJ3(J2v, J3v, A, B)
+
+    df_dsig1 = dfdJ2 * dJ2_dsigma(s1, s2, s3d, 1) + dfdJ3 * dJ3_dsigma(s1, s2, s3d, 1)
+    df_dsig2 = dfdJ2 * dJ2_dsigma(s1, s2, s3d, 2) + dfdJ3 * dJ3_dsigma(s1, s2, s3d, 2)
+
+    eps = 1e-14
+    if abs(df_dsig1) < eps:
+        return np.nan
+    return df_dsig2 / df_dsig1
+
+# ---------------------------
+# MAIN (user settings)
+# ---------------------------
+if __name__ == "__main__":
+    # Kim–Van coefficients (fixed)
+    A = 2
+    B = 0
+
+    # Stress ratio sweep: alpha = σ2/σ1 from 1.0 down to 0.0
+    alpha_list = np.linspace(1.0, 0.0, 101)
+
+    rho_list = np.array([rho_of_alpha(a, A, B) for a in alpha_list])
+
+    # ---- Print a small table (optional) ----
+    print(f"Kim–Van coefficients: A={A}, B={B}")
+    print("alpha = σ2/σ1   ->   rho = dε2/dε1")
+    for a, r in zip(alpha_list[::10], rho_list[::10]):
+        print(f"{a: .2f}          ->   {r: .6f}")
+
+    plt.figure()
+
+# =========================
+# Global plot style (large fonts)
+# =========================
+plt.rcParams.update({
+    # 전체 기본 폰트
+    "font.size": 16,
+
+    # 축 라벨, 제목
+    "axes.labelsize": 16,
+    "axes.titlesize": 16,
+
+    # 축 눈금 숫자
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+
+    # 범례
+    "legend.fontsize": 14,
+    "legend.title_fontsize": 14,
+
+    # 선/마커
+    "lines.linewidth": 2.8,
+    "lines.markersize": 8,
+
+    # 그림 크기
+    "figure.figsize": (6.5, 5.5)
+})
+
+# ---- Kim–Van (general A,B) ----
+rho_kimvan = np.array([rho_of_alpha(a, A, B) for a in alpha_list])
+
+# ---- Mises limit (A=0, B=0) ----
+rho_mises = np.array([rho_of_alpha(a, 0.0, 0.0) for a in alpha_list])
+
+plt.figure()
+
+plt.plot(
+    alpha_list,
+    rho_kimvan,
+    linestyle='-',
+    marker='o',
+    markevery=8,
+    label=rf'Kim–Van ($A={A:.2f},\,B={B:.2f}$)'
+)
+
+plt.plot(
+    alpha_list,
+    rho_mises,
+    linestyle='--',
+    color='black',
+    linewidth=2.5,
+    label='Analytical Mises ($A=0,\ B=0$)'
+)
+
+plt.xlabel(r"Stress ratio $\alpha=\sigma_2/\sigma_1$")
+plt.ylabel(r"Strain increment ratio $\rho=d\varepsilon_2/d\varepsilon_1$")
+
+plt.grid(True, linestyle=":", linewidth=1.2, alpha=0.8)
+
+plt.legend(
+    frameon=True,
+    fancybox=False,
+    edgecolor="black"
+)
+
+plt.title("Biaxial loading: strain increment ratio vs stress ratio")
+
+plt.xlim(0, 1)
+plt.tight_layout()
+plt.show()
