@@ -7,14 +7,17 @@ from matplotlib import colors
 # ============================================================
 # 0) Model: epsilon_f(eta, L)
 # ============================================================
+aa=5.099 
+bb=0.725
+cc=0.361
 def epsilon_f(eta, L):
     """
-    epsilon_f(eta, L) = 0.361 / [ (2/sqrt(L^2+3))^5.099 + (eta-0.33) ]^0.725
+    epsilon_f(eta, L) = cc / [ (2/sqrt(L^2+3))^aa + (eta-0.33) ]^bb
     NOTE: base must be > 0 to be real-valued.
     """
     s = 2.0 / np.sqrt(L**2 + 3.0)
-    base = (s**5.099 + (eta - 0.33))
-    return np.where(base > 0, 0.361 / (base**0.725), np.nan)
+    base = (s**aa + (eta - 0.33))
+    return np.where(base > 0, cc / (base**bb), np.nan)
 
 # ============================================================
 # 1) Mapping L -> theta -> bar_theta
@@ -192,3 +195,77 @@ def plot_2d_projection_eps_eta(eps_ymax=1.0):
 # ============================================================
 plot_3d_surface_with_paths(eps_zmax=2.0)   # 3D surface + paths
 plot_2d_projection_eps_eta(eps_ymax=1.0)   # 2D eps-eta projection
+
+# [기존 함수 유지]
+def epsilon_f(eta, L):
+    s = 2.0 / np.sqrt(L**2 + 3.0)
+    base = (s**5.099 + (eta - 0.33))
+    return np.where(base > 0, 0.361 / (base**0.725), np.nan)
+
+# ============================================================
+# 파단 성형한계선도(FFLD) 계산 함수
+# ============================================================
+def calculate_ffld():
+    # 응력비 alpha = sigma2 / sigma1 (Plane Stress: sigma3 = 0)
+    # 단축인장(0) ~ 등이축인장(1.0) 범위를 주로 봅니다. 
+    # 전단 영역까지 보기 위해 -0.5부터 시작합니다.
+    alphas = np.linspace(-0.5, 1.0, 500)
+    
+    ef1_list = []
+    ef2_list = []
+
+    for alpha in alphas:
+        # 1. Von Mises 기준 응력 상태 (s1=1, s2=alpha, s3=0)
+        s1, s2, s3 = 1.0, alpha, 0.0
+        sig_eq = np.sqrt(((s1 - s2)**2 + (s2 - s3)**2 + (s3 - s1)**2) / 2.0)
+        
+        # 2. eta(삼축응력도) 및 L(로드 파라미터) 계산
+        eta = (s1 + s2 + s3) / (3.0 * sig_eq)
+        # 로드 파라미터 정의 (s1 >= s2 >= s3 순서 보장 필요)
+        L = (2*s2 - s1 - s3) / (s1 - s3)
+        
+        # 3. 모델로부터 파단 등가 변형률 epsilon_f 추출
+        ef = epsilon_f(eta, L)
+        
+        if np.isnan(ef): continue
+
+        # 4. 변형률비 beta = de2 / de1 계산 (Mises Normality Rule)
+        # d_eps1 : d_eps2 : d_eps3 = (2*s1-s2-s3) : (2*s2-s1-s3) : (2*s3-s1-s2)
+        beta = (2*alpha - 1) / (2 - alpha)
+        
+        # 5. 등가 변형률을 주성분 변형률로 변환
+        # ef = sqrt(4/3 * (ef1^2 + ef1*ef2 + ef2^2))
+        ef1 = ef / np.sqrt(4/3 * (1 + beta + beta**2))
+        ef2 = beta * ef1
+        
+        ef1_list.append(ef1)
+        ef2_list.append(ef2)
+        
+    return np.array(ef1_list), np.array(ef2_list)
+
+# ============================================================
+# 시각화
+# ============================================================
+ef1, ef2 = calculate_ffld()
+
+plt.figure(figsize=(8, 7))
+plt.plot(ef2, ef1, 'r-', linewidth=3, label='Fracture Limit Line (Hu et al.)')
+
+# 주요 지점 표시 (단축인장, 평면변형, 등이축인장)
+# 단축인장: beta = -0.5
+# 평면변형: beta = 0 (alpha = 0.5)
+# 등이축인장: beta = 1 (alpha = 1.0)
+
+plt.axvline(0, color='black', linestyle=':', alpha=0.5)
+plt.xlabel(r'Minor Strain $\epsilon_2$', fontsize=14)
+plt.ylabel(r'Major Strain $\epsilon_1$', fontsize=14)
+plt.title('Fracture Forming Limit Diagram (FFLD)', fontsize=16)
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend(fontsize=12)
+
+# 보기 좋게 범위 설정
+plt.xlim(-0.6, 0.4)
+plt.ylim(0, 1.0)
+plt.gca().set_aspect('equal', adjustable='box')
+
+plt.show()
