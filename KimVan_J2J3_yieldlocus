@@ -18,13 +18,13 @@ limit = 600
 sigma_range = np.linspace(-limit, limit, 600)
 sigma_1, sigma_2 = np.meshgrid(sigma_range, sigma_range)
 
-alpha = -2
-beta = 0
+alpha = -1
+beta = 1
 ks = [114, 176, 235]
 line_styles = ['-', '--', '-.']
 
 # 2. 그래프 크기 설정 
-plt.figure(figsize=(6, 6))
+plt.figure(figsize=(5, 5))
 
 # 3. 등고선 그리기 및 범례 설정
 for k, ls in zip(ks, line_styles):
@@ -37,6 +37,7 @@ for k, ls in zip(ks, line_styles):
     # 범례용 가상 선 (Proxy Artist)
     plt.plot([], [], color='black', linestyle=ls, label=f'k = {k}', linewidth=2)
 
+
 # 4. x, y축 범위를 완전히 동일하게 설정
 plt.xlim(-limit, limit)
 plt.ylim(-limit, limit)
@@ -47,17 +48,18 @@ plt.gca().set_aspect('equal', adjustable='box')
 # 6. 그리드(Grid) 설정
 # 200 간격
 ticks = np.arange(-limit, limit + 1, 200)
-plt.xticks(ticks, fontsize=16) 
-plt.yticks(ticks, fontsize=16)
+plt.xticks(ticks, fontsize=14) 
+plt.yticks(ticks, fontsize=14)
 plt.grid(True, which='both', linestyle='-', color='gray', alpha=0.5)
 
 # 7. 라벨 및 제목 크기 
-plt.xlabel(r'$\sigma_x$ [MPa]', fontsize=22)
-plt.ylabel(r'$\sigma_y$ [MPa]', fontsize=22)
-plt.title('Yield Function Plot ', fontsize=20, pad=20)
+
+plt.xlabel(r'$\sigma_x$ [MPa]', fontsize=18)
+plt.ylabel(r'$\sigma_y$ [MPa]', fontsize=18)
+plt.title(rf'Yield Function ($\alpha={alpha}, \beta={beta}$)', fontsize=16, pad=20)
 
 # 8. 범례(Legend) 크기
-plt.legend(loc='upper left', fontsize=16, shadow=True)
+plt.legend(loc='upper left', fontsize=14, shadow=True)
 
 # 9. 레이아웃 최적화 및 출력
 plt.tight_layout()
