@@ -51,8 +51,7 @@ plt.xticks(ticks, fontsize=16)
 plt.yticks(ticks, fontsize=16)
 plt.grid(True, which='both', linestyle='-', color='gray', alpha=0.5)
 
-# 7. 라벨 및 제목 크기 확대
-
+# 7. 라벨 및 제목 크기 
 plt.xlabel(r'$\sigma_x$ [MPa]', fontsize=22)
 plt.ylabel(r'$\sigma_y$ [MPa]', fontsize=22)
 plt.title('Yield Function Plot ', fontsize=20, pad=20)
