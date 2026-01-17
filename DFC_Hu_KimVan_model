@@ -1,0 +1,346 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import colors
+import math
+
+# ============================================================
+# Hu et al. Eur. J. Mech. A Solids 2017, 66, 370-86
+# sheet material : AA2024-T351  (Hu 모델 파라미터)
+# ============================================================
+
+# ----------------------------
+# 0) Hu fracture model: eps_f(eta, L)
+# ----------------------------
+aa = 5.099
+bb = 0.725
+cc = 0.361
+
+def epsilon_f_Hu(eta, L):
+    """
+    epsilon_f(eta, L) = cc / [ (2/sqrt(L^2+3))^aa + (eta-0.33) ]^bb
+    """
+    s = 2.0 / np.sqrt(L**2 + 3.0)
+    base = (s**aa + (eta - 0.33))
+    return np.where(base > 0, cc / (base**bb), np.nan)
+
+# ----------------------------
+# 1) Mapping L -> theta -> bar_theta
+# tan(theta) = sqrt(3)*(L+1)/(3-L)
+# bar_theta = 1 - (6/pi)*theta
+# ----------------------------
+def theta_from_L(L):
+    return np.arctan(np.sqrt(3.0) * (L + 1.0) / (3.0 - L))
+
+def bar_theta_from_L(L):
+    return 1.0 - (6.0/np.pi) * theta_from_L(L)
+
+# ----------------------------
+# 2) Lode parameter (sorted principal stresses)
+# L = (2*s2 - s1 - s3) / (s1 - s3), with s1>=s2>=s3
+# ----------------------------
+def lode_L_sorted(s1, s2, s3):
+    eps = 1e-15
+    den = (s1 - s3)
+    den = np.where(np.abs(den) < eps, np.sign(den)*eps + eps, den)
+    return (2*s2 - s1 - s3) / den
+
+# ============================================================
+# 3) Kim–Van J2–J3 equivalent stress + normality derivatives
+#    ((1/sqrt3)*sigma_eq)^6 = J2^3 + A*J3^2 + B*J2^(3/2)*J3
+#    plane stress: sigma3=0
+# ============================================================
+
+def deviatoric_principal(s1, s2, s3):
+    sm = (s1 + s2 + s3) / 3.0
+    return s1 - sm, s2 - sm, s3 - sm
+
+def J2_J3(s1, s2, s3):
+    d1, d2, d3 = deviatoric_principal(s1, s2, s3)
+    J2 = 0.5 * (d1**2 + d2**2 + d3**2)
+    J3 = d1 * d2 * d3
+    return J2, J3, (d1, d2, d3)
+
+def kimvan_RHS(J2, J3, A, B):
+    # 원 Kim–Van 식 (부호 포함)
+    return (J2**3) + A*(J3**2) + B*(J2**1.5)*J3
+
+def sigma_eq_kimvan(s1, s2, s3, A=-2.0, B=0.0):
+    J2, J3, _ = J2_J3(s1, s2, s3)
+    RHS = kimvan_RHS(J2, J3, A, B)
+
+    # 음수일 수 있으므로 |RHS|로 등가응력 크기 계산
+    RHS_abs = np.abs(RHS)
+    RHS_abs = np.maximum(RHS_abs, 1e-30)
+
+    # ((1/sqrt3)*sigma_eq)^6 = RHS_abs  => sigma_eq = sqrt3 * RHS_abs^(1/6)
+    return np.sqrt(3.0) * (RHS_abs ** (1.0/6.0))
+
+def dJ3_dsigma(d1, d2, d3, which):
+    # d1,d2,d3는 deviatoric principal stresses
+    # ∂J3/∂σ1, ∂J3/∂σ2 (plane stress에서 σ3=0 이지만 미분식은 동일)
+    if which == 1:
+        return (2/3)*d2*d3 - (1/3)*d1*d3 - (1/3)*d1*d2
+    elif which == 2:
+        return -(1/3)*d2*d3 + (2/3)*d1*d3 - (1/3)*d1*d2
+    else:
+        # which==3
+        return -(1/3)*d2*d3 - (1/3)*d1*d3 + (2/3)*d1*d2
+
+def d_sigmaeq_dsig(s1, s2, s3, A=-2.0, B=0.0):
+    """
+    normality용: ∂sigma_eq/∂σi 계산 (i=1,2)
+    sigma_eq = sqrt3 * |RHS|^(1/6)
+    => d sigma_eq = sqrt3*(1/6)*|RHS|^(-5/6)*sign(RHS)*dRHS
+    """
+    J2, J3, (d1, d2, d3) = J2_J3(s1, s2, s3)
+    RHS = kimvan_RHS(J2, J3, A, B)
+
+    RHS_abs = abs(RHS)
+    RHS_abs = max(RHS_abs, 1e-30)
+    sgn = 1.0 if RHS >= 0 else -1.0
+
+    # dRHS/dJ2, dRHS/dJ3
+    # RHS = J2^3 + A J3^2 + B J2^(3/2) J3
+    sqrtJ2 = math.sqrt(max(J2, 0.0))
+    dRHS_dJ2 = 3.0*(J2**2) + (1.5*B*sqrtJ2*J3)
+    dRHS_dJ3 = 2.0*A*J3 + B*(J2**1.5)
+
+    # ∂J2/∂σi = deviatoric component di
+    dJ2_dsig1 = d1
+    dJ2_dsig2 = d2
+
+    dJ3_dsig1 = dJ3_dsigma(d1, d2, d3, 1)
+    dJ3_dsig2 = dJ3_dsigma(d1, d2, d3, 2)
+
+    dRHS_dsig1 = dRHS_dJ2*dJ2_dsig1 + dRHS_dJ3*dJ3_dsig1
+    dRHS_dsig2 = dRHS_dJ2*dJ2_dsig2 + dRHS_dJ3*dJ3_dsig2
+
+    pref = math.sqrt(3.0) * (1.0/6.0) * (RHS_abs ** (-5.0/6.0)) * sgn
+
+    dsigeq_dsig1 = pref * dRHS_dsig1
+    dsigeq_dsig2 = pref * dRHS_dsig2
+    return dsigeq_dsig1, dsigeq_dsig2
+
+def beta_kimvan(alpha_stress, A=-2.0, B=0.0):
+    """
+    cruciform style: sigma1=1, sigma2=alpha, sigma3=0
+    beta = dε2/dε1 = (∂sigma_eq/∂σ2)/(∂sigma_eq/∂σ1)
+    """
+    s1, s2, s3 = 1.0, alpha_stress, 0.0
+    ds1, ds2 = d_sigmaeq_dsig(s1, s2, s3, A, B)
+    eps = 1e-14
+    if abs(ds1) < eps:
+        return np.nan
+    return ds2/ds1
+
+# ============================================================
+# 4) Build 3D fracture surface: (bar_theta, eta) -> epsilon_f
+#    eta uses Kim–Van sigma_eq (requested)
+# ============================================================
+def make_fracture_surface(A=-2.0, B=0.0,
+                          eta_min=-0.33, eta_max=0.66, n_eta=35,
+                          L_min=-1.0, L_max=1.0, n_L=35):
+    eta_grid = np.linspace(eta_min, eta_max, n_eta)
+    L_grid   = np.linspace(L_min, L_max, n_L)
+
+    ETA, LODE = np.meshgrid(eta_grid, L_grid)
+    BT  = bar_theta_from_L(LODE)
+    EPS = epsilon_f_Hu(ETA, LODE)
+    return BT, ETA, EPS
+
+# ============================================================
+# 5) Loading paths on the surface (same as before)
+#    path A: sigma3=0, sigma2=k*sigma1
+# ============================================================
+def path_sigma3_zero(kmin=-1.0, kmax=1.0, n=2000, A=-2.0, B=0.0):
+    k = np.linspace(kmin, kmax, n)
+    S = np.vstack([np.ones_like(k), k, np.zeros_like(k)]).T
+    Ss = np.sort(S, axis=1)[:, ::-1]
+    s1o, s2o, s3o = Ss[:,0], Ss[:,1], Ss[:,2]
+
+    # eta with Kim–Van sigma_eq (invariant)
+    s1, s2, s3 = 1.0*np.ones_like(k), k, 0.0*np.ones_like(k)
+    sig_eq = np.array([sigma_eq_kimvan(s1[i], s2[i], s3[i], A, B) for i in range(len(k))])
+    eta = (s1 + s2 + s3) / (3.0 * sig_eq)
+
+    L   = lode_L_sorted(s1o, s2o, s3o)
+    bt  = bar_theta_from_L(L)
+    eps = epsilon_f_Hu(eta, L)
+    return bt, eta, eps
+
+def path_sigma2_zero(Kmax=80.0, n=5000, A=-2.0, B=0.0):
+    k = np.linspace(0.0, Kmax, n)
+    S = np.vstack([np.ones_like(k), np.zeros_like(k), -k]).T
+    Ss = np.sort(S, axis=1)[:, ::-1]
+    s1o, s2o, s3o = Ss[:,0], Ss[:,1], Ss[:,2]
+
+    s1, s2, s3 = 1.0*np.ones_like(k), 0.0*np.ones_like(k), -k
+    sig_eq = np.array([sigma_eq_kimvan(s1[i], s2[i], s3[i], A, B) for i in range(len(k))])
+    eta = (s1 + s2 + s3) / (3.0 * sig_eq)
+
+    L   = lode_L_sorted(s1o, s2o, s3o)
+    bt  = bar_theta_from_L(L)
+    eps = epsilon_f_Hu(eta, L)
+    return bt, eta, eps
+
+# ============================================================
+# 6) Plot (A) 3D surface with paths
+# ============================================================
+def plot_3d_surface_with_paths(A=-2.0, B=0.0, eps_zmax=2.0):
+    BT, ETA, EPS = make_fracture_surface(A=A, B=B, n_eta=35, n_L=35)
+
+    fig = plt.figure(figsize=(9, 5))
+    ax = fig.add_subplot(111, projection="3d")
+
+    norm = colors.Normalize(vmin=0.0, vmax=eps_zmax)
+    surf = ax.plot_surface(
+        BT, ETA, EPS,
+        cmap="viridis",
+        norm=norm,
+        linewidth=0.8,
+        edgecolor="k",
+        alpha=0.55,
+        antialiased=True,
+        zorder=1
+    )
+
+    bt1, eta1, eps1 = path_sigma3_zero(-1, 1, 3000, A=A, B=B)
+    bt2, eta2, eps2 = path_sigma2_zero(Kmax=80, n=8000, A=A, B=B)
+
+    m1 = np.isfinite(eps1) & (eta1 >= -0.33) & (eta1 <= 0.66)
+    m2 = np.isfinite(eps2) & (eta2 >= -0.33) & (eta2 <= 0.66)
+
+    ax.plot(bt1[m1], eta1[m1], eps1[m1],
+            color="deepskyblue", linestyle="--", linewidth=4.5, zorder=30,
+            label=r"$\sigma_3=0,\ \sigma_2=k\sigma_1$")
+
+    ax.plot(bt2[m2], eta2[m2], eps2[m2],
+            color="black", linewidth=9.0, zorder=34)
+    ax.plot(bt2[m2], eta2[m2], eps2[m2],
+            color="white", linewidth=6.5, zorder=35,
+            label=r"$\sigma_2=0,\ \sigma_3=-k\sigma_1$")
+
+    ax.set_xlabel(r"$\bar{\theta}$")
+    ax.set_ylabel(r"Stress triaxiality $\eta$ (Kim–Van)")
+    ax.set_zlabel(r"$\varepsilon_f$ (Hu)")
+
+    ax.set_ylim(0.66, -0.33)
+    ax.set_zlim(0, eps_zmax)
+    ax.view_init(elev=28, azim=-55)
+
+    ax.legend(loc="upper left", fontsize=10)
+    cbar = fig.colorbar(surf, ax=ax, shrink=0.55, aspect=12, label=r"$\varepsilon_f$")
+    cbar.set_ticks(np.linspace(0, eps_zmax, 5))
+
+    plt.tight_layout()
+    plt.show()
+
+# ============================================================
+# 7) Plot (B) 2D projection: epsilon_f - eta
+# ============================================================
+def plot_2d_projection_eps_eta(A=-2.0, B=0.0, eps_ymax=1.0):
+    _, eta1, eps1 = path_sigma3_zero(-1, 1, 4000, A=A, B=B)
+    _, eta2, eps2 = path_sigma2_zero(Kmax=80, n=12000, A=A, B=B)
+
+    m1 = np.isfinite(eps1) & (eta1 >= -0.33) & (eta1 <= 0.66)
+    m2 = np.isfinite(eps2) & (eta2 >= -0.33) & (eta2 <= 0.66)
+
+    eta1p, eps1p = eta1[m1], eps1[m1]
+    eta2p, eps2p = eta2[m2], eps2[m2]
+
+    i1 = np.argsort(eta1p); eta1p, eps1p = eta1p[i1], eps1p[i1]
+    i2 = np.argsort(eta2p); eta2p, eps2p = eta2p[i2], eps2p[i2]
+
+    plt.figure(figsize=(7,5))
+    plt.plot(eta1p, eps1p, linestyle="--", linewidth=2.5,
+             label=r"$\sigma_3=0,\ \sigma_2=k\sigma_1$")
+    plt.plot(eta2p, eps2p, linestyle="-", linewidth=2.8,
+             label=r"$\sigma_2=0,\ \sigma_3=-k\sigma_1$")
+
+    plt.xlim(-0.75, 0.75)
+    plt.ylim(0.0, eps_ymax)
+    plt.xlabel(r"Stress triaxiality, $\eta$ (Kim–Van)")
+    plt.ylabel(r"Equivalent plastic strain to fracture, $\varepsilon_f$ (Hu)")
+    plt.title(r"2D projection on the $\varepsilon_f$–$\eta$ plane")
+    plt.grid(True, alpha=0.35)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+# ============================================================
+# 8) FFLD (Fracture Forming Limit Diagram) using Kim–Van normality
+# ============================================================
+def calculate_ffld_kimvan(A=-2.0, B=0.0):
+    # stress ratio alpha = sigma2/sigma1, sigma3=0
+    alphas = np.linspace(-0.5, 1.0, 600)
+
+    ef1_list, ef2_list = [], []
+
+    for a in alphas:
+        s1, s2, s3 = 1.0, a, 0.0
+
+        # 1) sigma_eq (Kim–Van)
+        sig_eq = sigma_eq_kimvan(s1, s2, s3, A, B)
+
+        # 2) eta, L
+        eta = (s1 + s2 + s3) / (3.0 * sig_eq)
+
+        S = np.array([s1, s2, s3])
+        Ss = np.sort(S)[::-1]  # descending
+        s1o, s2o, s3o = Ss[0], Ss[1], Ss[2]
+        L = lode_L_sorted(s1o, s2o, s3o)
+
+        # 3) fracture eq strain from Hu model
+        ef = epsilon_f_Hu(eta, L)
+        if np.isnan(ef):
+            continue
+
+        # 4) beta from Kim–Van normality
+        beta = beta_kimvan(a, A=A, B=B)
+        if np.isnan(beta) or not np.isfinite(beta):
+            continue
+
+        # 5) Convert equivalent strain to principal strains
+        #    (Hu 모델의 εf는 보통 Mises-type equivalent plastic strain 기준으로 보고됨)
+        #    plane stress plastic incompressibility 가정하에 기존 변환식을 유지
+        denom = (4.0/3.0) * (1.0 + beta + beta**2)
+        if denom <= 0:
+            continue
+
+        ef1 = ef / np.sqrt(denom)
+        ef2 = beta * ef1
+
+        ef1_list.append(ef1)
+        ef2_list.append(ef2)
+
+    return np.array(ef1_list), np.array(ef2_list)
+
+def plot_ffld(A=-2.0, B=0.0):
+    ef1, ef2 = calculate_ffld_kimvan(A=A, B=B)
+
+    plt.figure(figsize=(8, 7))
+    plt.plot(ef2, ef1, 'r-', linewidth=3,
+             label=f'FFLD (Hu fracture + Kim–Van yield, A={A}, B={B})')
+
+    plt.axvline(0, color='black', linestyle=':', alpha=0.5)
+    plt.xlabel(r'Minor Strain $\epsilon_2$', fontsize=14)
+    plt.ylabel(r'Major Strain $\epsilon_1$', fontsize=14)
+    plt.title('Fracture Forming Limit Diagram (FFLD)', fontsize=16)
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend(fontsize=12)
+
+    plt.xlim(-0.4, 0.4)
+    plt.ylim(0, 0.8)
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.tight_layout()
+    plt.show()
+
+# ============================================================
+# 9) Run demo
+# ============================================================
+A = -2.0
+B = 0.0
+
+plot_3d_surface_with_paths(A=A, B=B, eps_zmax=2.0)   # 3D surface + paths
+plot_2d_projection_eps_eta(A=A, B=B, eps_ymax=1.0)   # 2D eps-eta projection
+plot_ffld(A=A, B=B)                                  # FFLD
