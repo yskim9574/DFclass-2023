@@ -1,0 +1,369 @@
+import numpy as np
+import math
+import matplotlib.pyplot as plt
+
+# ===================================================================
+# 1. Constitutive 클래스
+# ===================================================================
+class Constitutive:
+    """
+    재료의 구성방정식(경화법칙, 항복조건)과 현재 상태를 관리하는 클래스.
+    """
+    def __init__(self, label_hrd, params_hrd, label_yld, params_yld):
+        self.label_hrd = label_hrd
+        self.params_hrd = params_hrd
+        self.label_yld = label_yld
+        self.params_yld = params_yld
+        self.reset_mat(beta=0.0)
+
+    def reset_mat(self, beta):
+        self.eps = 0.0
+        self.pe = np.zeros(3)
+        self.sig = 0.0
+        self.dsig = 0.0
+        self.beta = beta
+
+    # ------------------ Swift hardening ------------------
+    def _swift_hrd(self, eps_eq):
+        K, eps0, n = self.params_hrd
+        return K * (eps0 + eps_eq)**n
+
+    def _swift_prime(self, eps_eq):
+        K, eps0, n = self.params_hrd
+        return K * n * (eps0 + eps_eq)**(n-1)
+
+    def update_hrd(self, eps_eq):
+        if self.label_hrd and self.label_hrd.lower() == 'swift':
+            self.sig = self._swift_hrd(eps_eq)
+            self.dsig = self._swift_prime(eps_eq)
+        else:
+            self.sig = 0.0
+            self.dsig = 0.0
+
+    def update_strain(self, dp, dp_vec):
+        self.eps += dp
+        self.pe[0] += dp_vec[0]
+        self.pe[1] += dp_vec[1]
+
+    # ------------------ Yield functions ------------------
+    def _vm2D(self, sig, para, option):
+        """von Mises (plane stress)"""
+        s1, s2 = sig[0], sig[1]
+        alpha = s2 / s1
+        f = math.sqrt(1 - alpha + alpha**2)
+        dfds1 = (2*s1 - s2) / (2 * s1 * f)
+        dfds2 = (2*s2 - s1) / (2 * s1 * f)
+        return 0, f, [dfds1, dfds2, 0]
+
+    def _Hill48_2D(self, sig, para, option):
+        """Hill48 (plane stress)"""
+        s1, s2 = sig[0], sig[1]
+        F, G, H = para['F'], para['G'], para['H']
+        f = math.sqrt(G*s1**2 + F*s2**2 + H*(s1-s2)**2)
+        dfds1 = (G*s1 - H*(s2-s1)) / f
+        dfds2 = (F*s2 + H*(s2-s1)) / f
+        return 0, f, [dfds1, dfds2, 0]
+
+    # ======================================================
+    # NEW: Kim–Van J2–J3 yield (plane stress, sigma3=0)
+    #
+    # ((1/sqrt3)*sigma_eq)^6 = J2^3 + A*J3^2 + B*J2^(3/2)*J3
+    # sigma_eq = sqrt3 * RHS^(1/6)
+    #
+    # Return:
+    #   f = sigma_eq (scale factor used in MMFC/MMFC2)
+    #   dfds = [∂f/∂σ1, ∂f/∂σ2, 0]
+    # ======================================================
+    def _KimVan_2D(self, sig, para, option):
+        s1, s2, s3 = sig[0], sig[1], 0.0  # plane stress
+        A = para.get('A', 0.0)
+        B = para.get('B', 0.0)
+
+        # deviatoric principal stresses
+        sm = (s1 + s2 + s3) / 3.0
+        d1 = s1 - sm
+        d2 = s2 - sm
+        d3 = s3 - sm
+
+        # invariants
+        J2 = 0.5 * (d1*d1 + d2*d2 + d3*d3)
+        J3 = d1*d2*d3
+
+        # RHS of Kim–Van
+        RHS = (J2**3) + A*(J3**2) + B*(J2**1.5)*J3
+
+        # 수치 안정성: RHS가 0 또는 음수면 (1/6)승이 문제될 수 있음
+        # (모델/계수에 따라 가능) -> 아주 작은 양수로 클리핑
+        eps = 1e-30
+        RHS_safe = max(RHS, eps)
+
+        c = math.sqrt(3.0)
+        f = c * (RHS_safe ** (1.0/6.0))  # sigma_eq
+
+        # ---- derivatives: df/dsigma = c*(1/6)*RHS^(-5/6) * dRHS/dsigma
+        pref = c * (1.0/6.0) * (RHS_safe ** (-5.0/6.0))
+
+        # dJ2/dσi = deviatoric component d_i
+        dJ2_ds1 = d1
+        dJ2_ds2 = d2
+
+        # exact derivatives of J3 wrt principal stresses (no division)
+        # Using: J3 = d1*d2*d3, di = σi - σm, σm=(σ1+σ2+σ3)/3
+        # ∂d1/∂σ1=2/3, ∂d2/∂σ1=-1/3, ∂d3/∂σ1=-1/3
+        # ∂d1/∂σ2=-1/3, ∂d2/∂σ2=2/3, ∂d3/∂σ2=-1/3
+        dJ3_ds1 = (2/3)*d2*d3 - (1/3)*d1*d3 - (1/3)*d1*d2
+        dJ3_ds2 = -(1/3)*d2*d3 + (2/3)*d1*d3 - (1/3)*d1*d2
+
+        # dRHS/dσi
+        # d(J2^3)=3*J2^2*dJ2
+        # d(A*J3^2)=2*A*J3*dJ3
+        # d(B*J2^(3/2)*J3)=B*( (3/2)*J2^(1/2)*J3*dJ2 + J2^(3/2)*dJ3 )
+        sqrtJ2 = math.sqrt(max(J2, 0.0))
+        J2_3_2 = (J2 ** 1.5)
+
+        dRHS_ds1 = 3*(J2**2)*dJ2_ds1 + 2*A*J3*dJ3_ds1 + B*(1.5*sqrtJ2*J3*dJ2_ds1 + J2_3_2*dJ3_ds1)
+        dRHS_ds2 = 3*(J2**2)*dJ2_ds2 + 2*A*J3*dJ3_ds2 + B*(1.5*sqrtJ2*J3*dJ2_ds2 + J2_3_2*dJ3_ds2)
+
+        dfds1 = pref * dRHS_ds1
+        dfds2 = pref * dRHS_ds2
+
+        return 0, f, [dfds1, dfds2, 0]
+
+    def f_yld(self, sig, option):
+        """선택된 항복조건"""
+        if self.label_yld.lower() == 'hill48':
+            return self._Hill48_2D(sig, self.params_yld, option)
+        elif self.label_yld.lower() == 'vm':
+            return self._vm2D(sig, self.params_yld, option)
+        elif self.label_yld.lower() in ['kimvan', 'kim-van', 'kv']:
+            return self._KimVan_2D(sig, self.params_yld, option)
+        else:
+            return self._vm2D(sig, self.params_yld, option)
+
+# ===================================================================
+
+def beta2alpha(func_name, para, beta):
+    """
+    주어진 strain increment ratio beta = dε2/dε1 에 대해
+    stress ratio alpha = σ2/σ1 를 역으로 찾음.
+    (MMFC/MMFC2 내부에서 사용)
+    """
+    if func_name.lower() in ['hill48', 'hill']:
+        func = Constitutive(None, None, 'Hill48', para).f_yld
+    elif func_name.lower() in ['kimvan', 'kim-van', 'kv']:
+        func = Constitutive(None, None, 'kimvan', para).f_yld
+    else:
+        func = Constitutive(None, None, 'vm', None).f_yld
+
+    tol = 1e-8
+    ll = -1.0
+    rr = 1.5
+    sleft  = [1, ll, 0]
+    sright = [1, rr, 0]
+    _, f1, df1 = func(sleft, 0)
+    _, f2, df2 = func(sright, 0)
+
+    b1 = df1[1] / df1[0]
+    b2 = df2[1] / df2[0]
+
+    if not (min(b1, b2) < beta < max(b1, b2)):
+        if abs(beta-b1) < abs(beta-b2): return ll
+        else: return rr
+
+    while rr - ll > tol:
+        alp = (ll + rr) / 2
+        sa = [1, alp, 0]
+        _, fa, dfa = func(sa, 0)
+        ba = dfa[1] / dfa[0]
+        if ba > beta:
+            rr = alp
+        elif ba < beta:
+            ll = alp
+        else:
+            break
+    return (ll + rr) / 2
+
+def MMFC(delp, dalp, N_ita, N_path, mat):
+    print(f"\n--- MMFC 시작: {mat.label_hrd}, {mat.label_yld} ---")
+    Eps_max = 1.5
+    e1, e2 = [], []
+    bbb = np.linspace(-0.5, 1, N_path)
+
+    for jj in range(N_path):
+        b1 = bbb[jj]
+        mat.reset_mat(beta=b1)
+        sgn0 = np.sign(b1) if b1 != 0.0 else 1.0
+
+        dfn = 0
+        idx = 0
+        while (mat.eps < Eps_max) and (idx < N_ita):
+            a1 = beta2alpha(mat.label_yld, mat.params_yld, b1)
+
+            sig  = [1, a1, 0]
+            sig1 = [1, a1 + dalp, 0]
+            _, f,  dfds  = mat.f_yld(sig, 0)
+            _, fd, dfdsd = mat.f_yld(sig1, 0)
+
+            b1  = dfds[1]  / dfds[0]
+            b1d = dfdsd[1] / dfdsd[0]
+            dbda = -(b1 - b1d) / dalp
+            df   = -(f  - fd ) / dalp
+
+            g  = (1 + a1*b1) / f
+            dp = delp
+            dp1 = dp / g
+            dp2 = b1 * dp1
+
+            mat.update_strain(dp, [dp1, dp2, 0])
+            mat.update_hrd(mat.eps)
+            H, dH = mat.sig, mat.dsig
+
+            s1 = H / f
+            dfde = g * dH / f
+
+            if dfde >= s1 or abs(dbda) < 1e-9:
+                db1 = 0
+            else:
+                if dfn < 1: dfn = idx
+                db1 = (g*dH/H - 1) * (f/df) * dbda * dp1
+
+            b1 += db1
+            sgn = np.sign(b1) if b1 != 0.0 else 1.0
+            if abs(sgn - sgn0) > 0:
+                e1.append(mat.pe[0])
+                e2.append(mat.pe[1])
+                break
+            idx += 1
+    return e1, e2
+
+def MMFC2(delp, dalp, N_ita, N_path, mat, sc):
+    print(f"\n--- MMFC2 시작: {mat.label_hrd}, {mat.label_yld} ---")
+    Eps_max = 1.0
+    pp = 6
+    e1, e2 = [], []
+    bbb = np.linspace(-0.5, 1, N_path)
+
+    for jj in range(N_path):
+        b0 = bbb[jj]
+        if abs(b0) < 0.005:
+            delp = 0.1 * delp
+
+        b1 = b0
+        mat.reset_mat(beta=b1)
+
+        peak = 0
+        dfn = 0
+        neck = 0
+        idx = 0
+        min_r2b, max_r2b = 10, -10
+
+        re  = np.zeros(N_ita)
+        re1 = np.zeros(N_ita)
+        re2 = np.zeros(N_ita)
+        rb  = np.zeros(N_ita)
+        rdb = np.zeros(N_ita)
+        r2b = np.zeros(N_ita)
+
+        while (mat.eps < Eps_max) and (idx < N_ita):
+            a1 = beta2alpha(mat.label_yld, mat.params_yld, b1)
+
+            sig  = [1, a1, 0]
+            sig1 = [1, a1 + dalp, 0]
+            _, f,  dfds  = mat.f_yld(sig, 0)
+            _, fd, dfdsd = mat.f_yld(sig1, 0)
+
+            b1  = dfds[1]  / dfds[0]
+            b1d = dfdsd[1] / dfdsd[0]
+            dbda = -(b1 - b1d) / dalp
+            df   = -(f  - fd ) / dalp
+
+            g  = (1 + a1*b1) / f
+            dp = delp
+            dp1 = dp / g
+            dp2 = b1 * dp1
+
+            mat.update_strain(dp, [dp1, dp2, 0])
+            mat.update_hrd(mat.eps)
+            H, dH = mat.sig, mat.dsig
+
+            s1 = H / f
+            dfde = g * dH / f
+            dsdb = -df * H / f**2 / dbda if abs(dbda) > 1e-9 else 0.0
+
+            if dfde >= s1 or dsdb == 0.0:
+                db1 = 0.0
+            else:
+                if dfn < 1: dfn = idx
+                db1 = sc * (s1 - dfde) / dsdb * dp1
+
+            b1 += db1
+
+            re[idx], re1[idx], re2[idx] = mat.eps, mat.pe[0], mat.pe[1]
+            rb[idx], rdb[idx] = b1, db1
+
+            if dfn > 0 and idx > 2*pp:
+                fit1order = np.polyfit(re[idx-2*pp: idx], rdb[idx-2*pp: idx], 1)
+                r2b[idx-pp] = abs(fit1order[0])
+                if peak == 0:
+                    if max_r2b > r2b[idx-pp]:
+                        peak = idx-pp
+                    else:
+                        max_r2b = r2b[idx-pp]
+                else:
+                    if min_r2b < r2b[idx-pp]:
+                        if neck == 0:
+                            neck = idx - pp
+                    else:
+                        min_r2b = r2b[idx-pp]
+
+                if (neck > 0) and (r2b[neck]*1.01 < r2b[idx-pp]):
+                    for ii in range(neck, idx-pp):
+                        if abs(r2b[ii]) < abs(r2b[neck]):
+                            neck = ii
+                    e1.append(re1[neck])
+                    e2.append(re2[neck])
+                    break
+            idx += 1
+    return e1, e2
+
+# ===================================================================
+# MAIN
+# ===================================================================
+if __name__ == "__main__":
+    hrd_label = 'Swift'
+    hrd_params = [300.0, 0.003, 0.25]
+
+    # -------------------------------------------------------
+    # 여기만 바꾸면 됨: Kim–Van 선택
+    # -------------------------------------------------------
+    yld_label = 'kimvan'
+    yld_params = {'A': -1.0, 'B': -1.0}   # ← 원하는 Kim–Van 계수로 설정
+    # -------------------------------------------------------
+
+    mat = Constitutive(label_hrd=hrd_label, params_hrd=hrd_params,
+                       label_yld=yld_label, params_yld=yld_params)
+
+    delta_p = 0.001
+    delta_alp = 1e-5
+    N_ita = 1500
+    N_path = 11
+
+    # MMFC / MMFC2
+    e1_values, e2_values = MMFC(delp=delta_p, dalp=delta_alp, N_ita=N_ita, N_path=N_path, mat=mat)
+    plt.plot(e2_values, e1_values, '-o', label='MMFC (Kim–Van)')
+
+    MMFC2_e1_values, MMFC2_e2_values = MMFC2(delp=delta_p, dalp=delta_alp, N_ita=N_ita, N_path=N_path, mat=mat, sc=0.5)
+    #plt.plot(MMFC2_e2_values, MMFC2_e1_values, '-s', label='MMFC2 (Kim–Van)')
+
+    plt.xlim(-0.4, 0.6)
+    plt.ylim(0, 1.0)
+
+    plt.xlabel("Minor Strain, ε₂")
+    plt.ylabel("Major Strain, ε₁")
+    plt.title(
+    f"FLC Prediction (Kim–Van J2J3), "
+    f"A={yld_params['A']:.2f}, B={yld_params['B']:.2f}"
+)
+    plt.grid(True)
+    plt.legend()
+    plt.show()
