@@ -1,0 +1,163 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ==========================
+# Lou–Huh (2014) params
+# ==========================
+a1 = 3.359
+a2 = 0.031
+a3 = 0.3
+AA=-1
+BB=-1
+
+def macaulay(x):
+    return np.maximum(x, 0.0)
+
+# --------------------------
+# Lode parameter (sorted)
+# --------------------------
+def lode_L_sorted(s1, s2, s3):
+    den = (s1 - s3)
+    den = np.where(np.abs(den) < 1e-15, np.sign(den)*1e-15 + 1e-15, den)
+    return (2*s2 - s1 - s3) / den
+
+# ==========================
+# Kim–Van equivalent stress
+# ((1/sqrt3)*seq)^6 = | J2^3 + A*J3^2 + B*J2^(3/2)*J3 |
+# ==========================
+def deviatoric_principal(sig1, sig2, sig3):
+    sm = (sig1 + sig2 + sig3)/3.0
+    return sig1-sm, sig2-sm, sig3-sm
+
+def J2_J3(sig1, sig2, sig3):
+    s1, s2, s3 = deviatoric_principal(sig1, sig2, sig3)
+    J2 = 0.5*(s1**2 + s2**2 + s3**2)
+    J3 = s1*s2*s3
+    return J2, J3
+
+def sigma_eq_kimvan(sig1, sig2, sig3, A=AA, B=BB):
+    J2, J3 = J2_J3(sig1, sig2, sig3)
+    RHS = (J2**3) + A*(J3**2) + B*(J2**1.5)*J3
+    RHS = np.abs(RHS)
+    RHS = np.maximum(RHS, 1e-30)
+    return np.sqrt(3.0) * (RHS**(1.0/6.0))
+
+# --------------------------
+# Kim–Van normality -> beta
+# beta = (∂seq/∂σ2)/(∂seq/∂σ1)   (numeric)
+# --------------------------
+def beta_kimvan(alpha, A=AA, B=BB, h=1e-6):
+    s1, s2, s3 = 1.0, alpha, 0.0
+
+    seq_p = sigma_eq_kimvan(s1+h, s2,   s3, A, B)
+    seq_m = sigma_eq_kimvan(s1-h, s2,   s3, A, B)
+    dseq_ds1 = (seq_p - seq_m) / (2*h)
+
+    seq_p = sigma_eq_kimvan(s1,   s2+h, s3, A, B)
+    seq_m = sigma_eq_kimvan(s1,   s2-h, s3, A, B)
+    dseq_ds2 = (seq_p - seq_m) / (2*h)
+
+    if abs(dseq_ds1) < 1e-14:
+        return np.nan
+    return dseq_ds2 / dseq_ds1
+
+# ==========================
+# Lou–Huh (2014): eps_f(eta, L) for proportional loading
+# ==========================
+def epsf_louhuh_2014(eta, L):
+    term1 = (2.0/np.sqrt(3.0 + L**2))**a1
+    inner = (3.0/4.0)*(eta + (3.0 - L)/(3.0*np.sqrt(3.0 + L**2)) + 1.0/3.0)
+    term2 = macaulay(inner)**a2
+    denom = term1 * term2
+    return np.where(denom > 0, a3/denom, np.nan)
+
+# ==========================
+# Convert eq strain to (e1,e2)
+# eq = sqrt(4/3*(e1^2 + e1*e2 + e2^2)), e2=beta*e1
+# ==========================
+def principal_strains_from_eq(eq, beta):
+    denom = (4.0/3.0)*(1.0 + beta + beta**2)
+    if denom <= 0:
+        return np.nan, np.nan
+    e1 = eq / np.sqrt(denom)
+    e2 = beta * e1
+    return e1, e2
+
+# ==========================
+# Compute FFLD + (eta, epsf) data
+# ==========================
+def compute_ffld_and_etaeps(A=AA, B=BB):
+    alphas = np.linspace(-3.0, 1.0, 600)
+
+    E1, E2 = [], []
+    ETA_list, EPSF_list = [], []
+
+    for a in alphas:
+        sig1, sig2, sig3 = 1.0, a, 0.0
+
+        # Kim–Van seq -> eta
+        seq = sigma_eq_kimvan(sig1, sig2, sig3, A, B)
+        sm  = (sig1 + sig2 + sig3) / 3.0
+        eta = sm / seq
+
+        # L uses sorted principal stresses
+        Ss = np.sort([sig1, sig2, sig3])[::-1]
+        L  = lode_L_sorted(Ss[0], Ss[1], Ss[2])
+
+        # Lou–Huh(2014) fracture eq strain
+        ef = epsf_louhuh_2014(eta, L)
+        if not np.isfinite(ef):
+            continue
+
+        # Kim–Van beta (normality)
+        beta = beta_kimvan(a, A, B)
+        if not np.isfinite(beta):
+            continue
+
+        e1, e2 = principal_strains_from_eq(ef, beta)
+        if np.isfinite(e1) and np.isfinite(e2):
+            E1.append(e1); E2.append(e2)
+            ETA_list.append(eta)
+            EPSF_list.append(ef)
+
+    return np.array(E1), np.array(E2), np.array(ETA_list), np.array(EPSF_list)
+
+# ==========================
+# Run + Plot
+# ==========================
+A = AA
+B = BB
+
+e1, e2, eta_list, epsf_list = compute_ffld_and_etaeps(A=A, B=B)
+
+# ---- (1) FFLD plot ----
+plt.figure(figsize=(5,7))
+plt.plot(e2, e1, 'k-', lw=2.5, label=f'FFLD (Lou–Huh 2014 + Kim–Van A={A}, B={B})')
+plt.axvline(0, color='gray', ls=':', lw=1)
+plt.xlabel('Minor strain, $\\varepsilon_2$')
+plt.ylabel('Major strain, $\\varepsilon_1$')
+plt.title('Fracture Forming Limit Diagram (FFLD)')
+plt.grid(True, ls='--', alpha=0.4)
+plt.gca().set_aspect('equal', adjustable='box')
+plt.legend()
+plt.xlim(-0.4, 0.4)
+plt.ylim(0.0, 0.6)
+plt.tight_layout()
+plt.show()
+
+# ---- (2) eta - eps_f plot ----
+# eta 순서대로 정렬해서 보기 좋게
+idx = np.argsort(eta_list)
+eta_s = eta_list[idx]
+epsf_s = epsf_list[idx]
+
+plt.figure(figsize=(5,5))
+plt.plot(eta_s, epsf_s, 'r-', lw=2.5)
+plt.xlabel('Stress triaxiality, $\\eta$')
+plt.ylabel('Fracture equivalent strain, $\\bar\\varepsilon_f$')
+plt.title('Fracture strain locus: $\\eta$ – $\\bar\\varepsilon_f$')
+plt.grid(True, ls='--', alpha=0.4)
+plt.xlim(-0.75, 0.75)
+plt.ylim(0.0, 0.8)
+plt.tight_layout()
+plt.show()
