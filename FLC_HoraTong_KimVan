@@ -1,0 +1,118 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import fsolve
+
+# 1. Kim–Tuan hardening law
+def get_hardening(eb):
+    eb = np.maximum(eb, 1e-8)
+    A_const, B_coeff, eps0, n_val, D_exp = 162.94, 429, 0.002, 0.390, 855.8
+    term1 = (eps0 + eb)**n_val
+    term2 = 1 - np.exp(-D_exp * eb)
+    H = A_const + B_coeff * term1 * term2
+    
+    term1_p = n_val * (eps0 + eb)**(n_val - 1)
+    term2_p = D_exp * np.exp(-D_exp * eb)
+    Hp = B_coeff * (term1_p * term2 + term1 * term2_p)
+    return H, Hp
+
+# 2. Kim-Van J2-J3 Yield Criterion (A=-2.0, B=0)
+A_y, B_y = -2.0, 0.0
+
+def get_j2_j3(s1, s2):
+    j2 = (1/3)*(s1**2 - s1*s2 + s2**2)
+    j3 = (1/27)*(2*s1**3 + 2*s2**3 - 3*(s1 + s2)*s1*s2)
+    return j2, j3
+
+def yield_function_phi(s1, s2):
+    j2, j3 = get_j2_j3(s1, s2)
+    val = (j2**3 + A_y * j3**2 + B_y * (np.abs(j2)**1.5) * j3)
+    return np.power(np.maximum(val, 0), 1/6)
+
+phi_uni = yield_function_phi(1.0, 0.0)
+
+def get_kimvan_params(alpha):
+    s1, s2 = 1.0, alpha
+    delta = 1e-5 # 수치 미분 간격
+    
+    phi0 = yield_function_phi(s1, s2)
+    f = phi0 / phi_uni
+    
+    dphi_ds1 = (yield_function_phi(s1 + delta, s2) - phi0) / delta
+    dphi_ds2 = (yield_function_phi(s1, s2 + delta) - phi0) / delta
+    beta = dphi_ds2 / dphi_ds1
+    
+    f_p = (yield_function_phi(s1, s2 + delta) / phi_uni - f) / delta
+    
+    def quick_beta(a):
+        p_val = yield_function_phi(1.0, a)
+        d1 = (yield_function_phi(1.0 + delta, a) - p_val) / delta
+        d2 = (yield_function_phi(1.0, a + delta) - p_val) / delta
+        return d2 / d1
+    
+    b_p = (quick_beta(alpha + delta) - beta) / delta
+    g = (1 + alpha * beta) / f
+    return f, f_p, b_p, g, beta
+
+# 3. MMFC 목적 함수
+def mmfc_objective(e1, beta_target, last_alpha):
+    if e1 <= 0: return 1.0
+    # 수치적 안정을 위해 alpha_sol을 찾을 때 이전 단계의 값을 초기값으로 사용
+    try:
+        alpha_sol = fsolve(lambda a: get_kimvan_params(a)[4] - beta_target, last_alpha)[0]
+    except:
+        return 1.0
+        
+    f, f_p, b_p, g, _ = get_kimvan_params(alpha_sol)
+    eb = g * e1
+    H, Hp = get_hardening(eb)
+    rhs = (1.0 / g) * (1.0 - (f_p / f) * (beta_target / (b_p * e1)))
+    return (Hp / H) - rhs, alpha_sol
+
+# 4. FLC 계산 (beta 범위를 1.0까지 확장)
+beta_range = np.linspace(-0.5, 1.0, 100) # 0.6에서 1.0으로 확장
+e1_results, e2_results = [], []
+current_alpha = 0.5 # 초기 추측값
+
+print("등이축 인장 영역까지 계산 중...")
+for b in beta_range:
+    # 목적 함수에서 alpha_sol도 함께 업데이트 받아 다음 루프에 전달
+    obj_wrap = lambda e: mmfc_objective(e, b, current_alpha)[0]
+    try:
+        sol = fsolve(obj_wrap, 0.3)
+        e1_star = sol[0]
+        if e1_star > 0:
+            _, last_a = mmfc_objective(e1_star, b, current_alpha)
+            current_alpha = last_a # alpha 추적
+            e1_results.append(e1_star)
+            e2_results.append(b * e1_star)
+    except:
+        continue
+
+# 5. 시각화
+plt.figure(figsize=(6, 6))
+plt.plot(e2_results, e1_results, 'k-', linewidth=4, label='Hora-Tong MMFC (Kim-Van)')
+
+# 가이드 라인 (Pure Shear & Biaxial)
+plt.plot([-0.5, 0], [0.5, 0], 'k:', linewidth=1)
+plt.plot([0, 0.6], [0, 0.6], 'k:', linewidth=1)
+
+# 디자인 설정
+plt.title('Forming Limit Diagram', fontsize=26, pad=20)
+plt.xlabel(r'Minor Strain $\epsilon_2$', fontsize=24)
+plt.ylabel(r'Major Strain $\epsilon_1$', fontsize=24)
+plt.xticks(fontsize=18)
+plt.yticks(fontsize=18)
+
+# 범위 및 정사각형 그리드
+plt.xlim(-0.4, 0.4)
+plt.ylim(0, 0.8)
+plt.gca().set_aspect('equal', adjustable='box')
+plt.grid(True, linestyle='--', alpha=0.5)
+plt.legend(fontsize=20, loc='upper left')
+
+# 수식 박스
+plt.text(-0.35, 0.9, r"Yield: $(J_2)^3 - 2(J_3)^2 = k^6$", fontsize=18, 
+         color='blue', bbox=dict(facecolor='white', alpha=0.8))
+
+plt.tight_layout()
+plt.show()
