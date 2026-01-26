@@ -1,0 +1,81 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 1. 재료 파라미터 설정
+n = 0.15          # 가공경화지수
+K = 250           # 강도계수 [MPa] (bar_sigma = K * epsilon^n)
+
+# 2. 미제스(von Mises) 항복 조건에 따른 함수들 정의
+def get_mises_params(beta):
+    """
+    변형률비 beta (de2/de1)에 따른 응력비 alpha 및 관련 미분값 계산
+    미제스 조건: f(alpha) = sqrt(1 - alpha + alpha^2)
+    """
+    # 유동 법칙에 따른 응력비 alpha 계산: beta = (2*alpha - 1) / (2 - alpha)
+    # 이를 alpha에 대해 정리하면:
+    alpha = (2 * beta + 1) / (beta + 2)
+    
+    # f(alpha) 계산
+    f_alpha = np.sqrt(1 - alpha + alpha**2)
+    
+    # f'(alpha) = df/dalpha
+    f_prime = (2 * alpha - 1) / (2 * np.sqrt(1 - alpha + alpha**2))
+    
+    # beta'(alpha) = dbeta/dalpha = 3 / (2 - alpha)^2
+    beta_prime = 3 / (2 - alpha)**2
+    
+    return alpha, f_alpha, f_prime, beta_prime
+
+# 3. 성형한계선(FLC) 계산
+# 변형률비 beta 범위: -0.5 (단축인장) ~ 1.0 (등이축인장)
+beta_range = np.linspace(-0.5, 1.0, 100)
+
+e1_list = []
+e2_list = []
+
+for beta in beta_range:
+    # 각 beta 지점에서의 미제스 파라미터 획득
+    alpha, f_a, f_p, b_p = get_mises_params(beta)
+    
+    # 이미지의 식 (12-95c)로부터 유도된 성형한계 주변형률 식
+    # epsilon_1* = n + (f'/f) * (beta / beta')
+    if b_p != 0:
+        e1_star = n + (f_p / f_a) * (beta / b_p)
+    else:
+        e1_star = n
+        
+    e2_star = beta * e1_star
+    
+    e1_list.append(e1_star)
+    e2_list.append(e2_star)
+
+# 4. 그래프 시각화 (사용자 이전 요청사항 반영: 정사각형 그리드, 큰 글씨)
+plt.figure(figsize=(10, 10))
+
+# 성형한계선 플롯
+plt.plot(e2_list, e1_list, 'b-', linewidth=3, label=f'MMFC (n={n}, K={K})')
+
+# 주요 지점 표시 (Plane Strain: beta=0)
+ps_idx = (np.abs(beta_range - 0)).argmin()
+plt.plot(e2_list[ps_idx], e1_list[ps_idx], 'ro')
+plt.text(e2_list[ps_idx]+0.01, e1_list[ps_idx]-0.02, f'Plane Strain ($\epsilon_1={e1_list[ps_idx]:.2f}$)', fontsize=15)
+
+# 그래프 설정
+plt.title(r'Forming Limit Curve (Hora-Tong MMFC)', fontsize=24, pad=20)
+plt.xlabel(r'Minor Strain $\epsilon_2$', fontsize=20)
+plt.ylabel(r'Major Strain $\epsilon_1$', fontsize=20)
+
+# x, y축 범위 및 정사각형 그리드 설정
+limit = 0.6
+plt.xlim(-0.4, limit)
+plt.ylim(0, limit)
+plt.gca().set_aspect('equal', adjustable='box')
+
+# 그리드 및 폰트 크기
+plt.xticks(fontsize=15)
+plt.yticks(fontsize=15)
+plt.grid(True, linestyle='--', alpha=0.7)
+plt.legend(fontsize=18, loc='upper left')
+
+plt.tight_layout()
+plt.show()
