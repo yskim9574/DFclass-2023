@@ -1,80 +1,83 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.optimize import fsolve
 
-# 1. 재료 파라미터 설정
-n = 0.15          # 가공경화지수
-K = 250           # 강도계수 [MPa] (bar_sigma = K * epsilon^n)
+# 1. 경화 모델 정의 (Kim-Tuan)
+def get_hardening(eb):
+    eb = np.maximum(eb, 1e-8)
+    # 파라미터
+    A_const = 162.94
+    B_coeff = 432.74
+    eps0 = 0.002
+    n_val = 0.590
+    D_exp = 492.69
+    
+    # sigma = A + B * (eps0 + eb)^n * (1 - exp(-D*eb))
+    term1 = (eps0 + eb)**n_val
+    term2 = 1 - np.exp(-D_exp * eb)
+    H = A_const + B_coeff * term1 * term2
+    
+    # 미분 H'
+    term1_p = n_val * (eps0 + eb)**(n_val - 1)
+    term2_p = D_exp * np.exp(-D_exp * eb)
+    Hp = B_coeff * (term1_p * term2 + term1 * term2_p)
+    
+    return H, Hp
 
-# 2. 미제스(von Mises) 항복 조건에 따른 함수들 정의
+# 2. 미제스(Mises) 항복 조건 파라미터 
 def get_mises_params(beta):
-    """
-    변형률비 beta (de2/de1)에 따른 응력비 alpha 및 관련 미분값 계산
-    미제스 조건: f(alpha) = sqrt(1 - alpha + alpha^2)
-    """
-    # 유동 법칙에 따른 응력비 alpha 계산: beta = (2*alpha - 1) / (2 - alpha)
-    # 이를 alpha에 대해 정리하면:
+    # 응력비 alpha 계산
     alpha = (2 * beta + 1) / (beta + 2)
-    
-    # f(alpha) 계산
-    f_alpha = np.sqrt(1 - alpha + alpha**2)
-    
-    # f'(alpha) = df/dalpha
-    f_prime = (2 * alpha - 1) / (2 * np.sqrt(1 - alpha + alpha**2))
-    
-    # beta'(alpha) = dbeta/dalpha = 3 / (2 - alpha)^2
-    beta_prime = 3 / (2 - alpha)**2
-    
-    return alpha, f_alpha, f_prime, beta_prime
+    # 항복 함수 f(alpha)
+    f = np.sqrt(1 - alpha + alpha**2)
+    # f'(alpha)
+    f_p = (2 * alpha - 1) / (2 * f)
+    # beta'(alpha)
+    b_p = 3 / (2 - alpha)**2
+    # 등가 변형률 증분비 g
+    g = (1 + alpha * beta) / f
+    return f, f_p, b_p, g
 
-# 3. 성형한계선(FLC) 계산
-# 변형률비 beta 범위: -0.5 (단축인장) ~ 1.0 (등이축인장)
+# 3. 목적 함수(Objective Function) 정의
+def mmfc_objective(e1, beta):
+    if e1 <= 0: return 1.0
+    f, f_p, b_p, g = get_mises_params(beta)
+    eb = g * e1
+    H, Hp = get_hardening(eb)
+    
+    # MMFC 조건: (H'/H) = (1/g) * [1 - (f'/f) * (beta / (beta' * e1))]
+    # 수치적 안정성을 위해 좌변 - 우변 = 0 형태로 구성
+    rhs = (1.0 / g) * (1.0 - (f_p / f) * (beta / (b_p * e1)))
+    return (Hp / H) - rhs
+
+# 4. FLC 계산 (fsolve 사용)
 beta_range = np.linspace(-0.5, 1.0, 100)
-
-e1_list = []
-e2_list = []
+e1_results = []
+e2_results = []
 
 for beta in beta_range:
-    # 각 beta 지점에서의 미제스 파라미터 획득
-    alpha, f_a, f_p, b_p = get_mises_params(beta)
-    
-    # 이미지의 식 (12-95c)로부터 유도된 성형한계 주변형률 식
-    # epsilon_1* = n + (f'/f) * (beta / beta')
-    if b_p != 0:
-        e1_star = n + (f_p / f_a) * (beta / b_p)
-    else:
-        e1_star = n
-        
-    e2_star = beta * e1_star
-    
-    e1_list.append(e1_star)
-    e2_list.append(e2_star)
+    # fsolve를 이용해 해를 찾음. 초기값(x0)을 0.3으로 설정
+    sol = fsolve(mmfc_objective, 0.3, args=(beta,))
+    e1_star = sol[0]
+    e1_results.append(e1_star)
+    e2_results.append(beta * e1_star)
 
-# 4. 그래프 시각화 (사용자 이전 요청사항 반영: 정사각형 그리드, 큰 글씨)
+# 5. 시각화 (정사각형 그리드, 큰 폰트)
 plt.figure(figsize=(10, 10))
+plt.plot(e2_results, e1_results, 'k-', linewidth=3, label='Hora-Tong MMFC (Original Logic)')
 
-# 성형한계선 플롯
-plt.plot(e2_list, e1_list, 'b-', linewidth=3, label=f'MMFC (n={n}, K={K})')
+# 스타일 설정
+plt.title('Forming Limit Diagram', fontsize=24, pad=20)
+plt.xlabel(r'Minor Strain $\epsilon_2$', fontsize=22)
+plt.ylabel(r'Major Strain $\epsilon_1$', fontsize=22)
+plt.xticks(fontsize=16)
+plt.yticks(fontsize=16)
 
-# 주요 지점 표시 (Plane Strain: beta=0)
-ps_idx = (np.abs(beta_range - 0)).argmin()
-plt.plot(e2_list[ps_idx], e1_list[ps_idx], 'ro')
-plt.text(e2_list[ps_idx]+0.01, e1_list[ps_idx]-0.02, f'Plane Strain ($\epsilon_1={e1_list[ps_idx]:.2f}$)', fontsize=15)
-
-# 그래프 설정
-plt.title(r'Forming Limit Curve (Hora-Tong MMFC)', fontsize=24, pad=20)
-plt.xlabel(r'Minor Strain $\epsilon_2$', fontsize=20)
-plt.ylabel(r'Major Strain $\epsilon_1$', fontsize=20)
-
-# x, y축 범위 및 정사각형 그리드 설정
-limit = 0.6
-plt.xlim(-0.4, limit)
-plt.ylim(0, limit)
+# 정사각형 그리드 및 범위 고정
+plt.xlim(-0.4, 0.6)
+plt.ylim(0, 1.0)
 plt.gca().set_aspect('equal', adjustable='box')
-
-# 그리드 및 폰트 크기
-plt.xticks(fontsize=15)
-plt.yticks(fontsize=15)
-plt.grid(True, linestyle='--', alpha=0.7)
+plt.grid(True, linestyle='--', alpha=0.6)
 plt.legend(fontsize=18, loc='upper left')
 
 plt.tight_layout()
