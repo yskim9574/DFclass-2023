@@ -1,0 +1,209 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import fsolve
+
+# =========================
+# 1) Hardening law (Kim–Tuan)
+# =========================
+def get_hardening(eb):
+    eb = np.maximum(eb, 1e-12)
+    A_const, B_coeff, eps0, n_val, D_exp = 162, 432, 0.002, 0.59, 492
+
+    term1 = (eps0 + eb)**n_val
+    term2 = 1 - np.exp(-D_exp * eb)
+    H = A_const + B_coeff * term1 * term2
+
+    term1_p = n_val * (eps0 + eb)**(n_val - 1)
+    term2_p = D_exp * np.exp(-D_exp * eb)
+    Hp = B_coeff * (term1_p * term2 + term1 * term2_p)
+    return H, Hp
+
+
+# =========================
+# 2) Kim–Van J2–J3 yield
+# =========================
+A_y, B_y = -2.0, 0.0
+
+def get_j2_j3(s1, s2):
+    j2 = (1.0/3.0) * (s1**2 - s1*s2 + s2**2)
+    j3 = (1.0/27.0) * (2*s1**3 + 2*s2**3 - 3*(s1 + s2)*s1*s2)
+    return j2, j3
+
+def yield_function_phi(s1, s2):
+
+    j2, j3 = get_j2_j3(s1, s2)
+    val = (j2**3 + A_y * (j3**2) + B_y * (np.abs(j2)**1.5) * j3)
+    return np.sign(val) * (np.abs(val) + 1e-16)**(1.0/6.0)
+
+phi_uni = yield_function_phi(1.0, 0.0)
+
+
+# =========================
+# 3) Kim–Van parameters: f, f', beta, b' (중앙차분 + delta 상향)
+# =========================
+def get_kimvan_params(alpha, delta=1e-4):
+    s1, s2 = 1.0, alpha
+
+    # f
+    phi0 = yield_function_phi(s1, s2)
+    f = phi0 / phi_uni
+
+    # dphi/ds1, dphi/ds2 (central difference)
+    dphi_ds1 = (yield_function_phi(s1 + delta, s2) - yield_function_phi(s1 - delta, s2)) / (2*delta)
+    dphi_ds2 = (yield_function_phi(s1, s2 + delta) - yield_function_phi(s1, s2 - delta)) / (2*delta)
+
+    # beta = dphi/ds2 / dphi/ds1
+    # (dphi_ds1이 0에 접근하면 불안정하므로 안전장치)
+    if np.abs(dphi_ds1) < 1e-14:
+        dphi_ds1 = np.sign(dphi_ds1) * 1e-14 if dphi_ds1 != 0 else 1e-14
+    beta = dphi_ds2 / dphi_ds1
+
+    # f' = df/dalpha (central difference)
+    f_plus  = yield_function_phi(1.0, alpha + delta) / phi_uni
+    f_minus = yield_function_phi(1.0, alpha - delta) / phi_uni
+    f_p = (f_plus - f_minus) / (2*delta)
+
+    # b' = dbeta/dalpha (central difference)
+    def quick_beta(a):
+        p = yield_function_phi(1.0, a)
+        d1 = (yield_function_phi(1.0 + delta, a) - yield_function_phi(1.0 - delta, a)) / (2*delta)
+        d2 = (yield_function_phi(1.0, a + delta) - yield_function_phi(1.0, a - delta)) / (2*delta)
+        if np.abs(d1) < 1e-14:
+            d1 = np.sign(d1) * 1e-14 if d1 != 0 else 1e-14
+        return d2 / d1
+
+    b_plus  = quick_beta(alpha + delta)
+    b_minus = quick_beta(alpha - delta)
+    b_p = (b_plus - b_minus) / (2*delta)
+
+    # g
+    if np.abs(f) < 1e-14:
+        f = np.sign(f) * 1e-14 if f != 0 else 1e-14
+    g = (1.0 + alpha * beta) / f
+
+    return f, f_p, b_p, g, beta
+
+
+# =========================
+# 4) alpha solve: beta(alpha)=beta_target  (연속추적)
+# =========================
+def solve_alpha_for_beta(beta_target, alpha_guess, delta=1e-4):
+    fun = lambda a: get_kimvan_params(a, delta=delta)[4] - beta_target
+    # fsolve는 초기값에 민감 -> 이전 단계 alpha를 전달(continuation)
+    alpha_sol = fsolve(fun, alpha_guess, xtol=1e-10, maxfev=200)[0]
+    return alpha_sol
+
+
+# =========================
+# 5) MMFC objective: Hp/H - rhs = 0
+#    (b_p가 0 근방이면 수치 폭주/무력화 -> 최소값 클램프)
+# =========================
+def mmfc_residual(e1, beta_target, alpha_guess, delta=1e-4):
+    # e1은 양수 영역에서만 의미
+    if e1 <= 1e-12:
+        return 1.0, alpha_guess
+
+    try:
+        alpha_sol = solve_alpha_for_beta(beta_target, alpha_guess, delta=delta)
+    except Exception:
+        return 1.0, alpha_guess
+
+    f, f_p, b_p, g, _ = get_kimvan_params(alpha_sol, delta=delta)
+
+    # 안전장치: g, b_p, f
+    if np.abs(g) < 1e-12:
+        g = np.sign(g) * 1e-12 if g != 0 else 1e-12
+
+    # b_p가 너무 작으면 beta/(b_p*e1) 항이 폭주하거나, 반대로 수치적으로 의미를 잃음
+    bp_min = 1e-6
+    if np.abs(b_p) < bp_min:
+        b_p = np.sign(b_p) * bp_min if b_p != 0 else bp_min
+
+    eb = g * e1
+    H, Hp = get_hardening(eb)
+
+    # rhs
+    rhs = (1.0 / g) * (1.0 - (f_p / f) * (beta_target / (b_p * e1)))
+
+    return (Hp / H) - rhs, alpha_sol
+
+
+# =========================
+# 6) FLC computation (beta<0, beta>0를 따로 계산 후 결합)
+# =========================
+def compute_flc(beta_range, e1_init=0.25, alpha_init=0.5, delta=1e-4):
+    e1_results, e2_results = [], []
+
+    e1_guess = e1_init
+    alpha_guess = alpha_init
+
+    for b in beta_range:
+        # fsolve는 scalar residual이 필요
+        fun = lambda e: mmfc_residual(e, b, alpha_guess, delta=delta)[0]
+
+        try:
+            sol = fsolve(fun, e1_guess, xtol=1e-10, maxfev=300)
+            e1_star = float(sol[0])
+            if e1_star <= 0:
+                continue
+
+            # 업데이트(continuation)
+            _, alpha_sol = mmfc_residual(e1_star, b, alpha_guess, delta=delta)
+            alpha_guess = alpha_sol
+            e1_guess = e1_star
+
+            e1_results.append(e1_star)
+            e2_results.append(b * e1_star)
+
+        except Exception:
+            # 실패 시 다음으로 넘어가되, 초기값을 약간 완화
+            e1_guess = max(e1_guess * 0.95, 0.05)
+            continue
+
+    return np.array(e2_results), np.array(e1_results)
+
+
+# =========================
+# 7) 실행부
+# =========================
+# beta는 "strain path slope"로 이해하는게 일반적입니다(ε2 = beta * ε1).
+# V자 형태를 잘 따라가려면 0 근방을 촘촘히.
+beta_neg = np.linspace(-0.5, -1e-6, 70)
+beta_pos = np.linspace( 1e-6,  1.0, 110)
+
+print("beta<0 영역 계산...")
+e2n, e1n = compute_flc(beta_neg, e1_init=0.30, alpha_init=0.4, delta=1e-4)
+
+print("beta>0 영역 계산...")
+# +쪽은 다른 분기로 갈 수 있어 초기 alpha/e1을 약간 다르게 주는 것이 도움이 되는 경우가 많음
+e2p, e1p = compute_flc(beta_pos, e1_init=0.18, alpha_init=0.8, delta=1e-4)
+
+# 결합 및 정렬
+e2_all = np.concatenate([e2n, e2p])
+e1_all = np.concatenate([e1n, e1p])
+
+idx = np.argsort(e2_all)
+e2_all, e1_all = e2_all[idx], e1_all[idx]
+
+# =========================
+# 8) Plot
+# =========================
+plt.figure(figsize=(6, 6))
+plt.plot(e2_all, e1_all, 'k-', linewidth=4, label='Hora-Tong MMFC (Kim-Van, fixed numerics)')
+
+# 가이드 라인 (예시)
+plt.plot([-0.5, 0], [0.5, 0], 'k:', linewidth=1)   # (개념용) pure shear 가이드
+plt.plot([0, 0.6], [0, 0.6], 'k:', linewidth=1)    # biaxial 가이드
+
+plt.title('Forming Limit Diagram', fontsize=26, pad=20)
+plt.xlabel(r'Minor Strain $\epsilon_2$', fontsize=24)
+plt.ylabel(r'Major Strain $\epsilon_1$', fontsize=24)
+plt.xticks(fontsize=18)
+plt.yticks(fontsize=18)
+
+plt.xlim(-0.2, 0.4)
+plt.ylim(0, 0.5)
+plt.gca().set_aspect('equal', adjustable='box')
+plt.grid(True, linestyle='--', alpha=0.5)
+plt.legend(fontsize=14, loc='upper left')
+plt.show()
