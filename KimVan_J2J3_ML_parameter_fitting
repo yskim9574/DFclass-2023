@@ -67,7 +67,7 @@ X_exp_input = np.concatenate([
 
 # ANN 모델 정의 (3개의 은닉층)
 ann_model = MLPRegressor(
-    hidden_layer_sizes=(24, 16,8),  # 
+    hidden_layer_sizes=(24, 24, 1),  # 
     max_iter=2000, 
     activation='relu', 
     solver='adam',
