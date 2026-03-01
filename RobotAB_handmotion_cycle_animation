@@ -1,0 +1,398 @@
+# ============================================================
+#  Dual 2-Link Robot Arms — Independent Pick & Place
+#  Robot A (5s × 7 cycles) + Robot B (7s × 5 cycles) = 35s
+#  ★ MP4 저장 → base64 인라인 재생 (to_jshtml 사용 안 함!)
+#  Google Colab 전용
+# ============================================================
+#  Colab에서 실행 전 (한 번만):
+#    !pip install pillow
+# ============================================================
+
+import math, numpy as np, os, base64
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.patches import FancyBboxPatch
+from matplotlib.animation import FuncAnimation
+from IPython.display import HTML, display
+
+# ═══════════════════════════════════
+#  IK / FK
+# ═══════════════════════════════════
+def ik(x, y, bx, by, L1, L2, el="down"):
+    dx, dy = x - bx, y - by
+    r2 = dx*dx + dy*dy
+    c2 = max(-1, min(1, (r2 - L1**2 - L2**2) / (2*L1*L2)))
+    t2 = math.acos(c2)
+    if el == "up": t2 = -t2
+    t1 = math.atan2(dy, dx) - math.atan2(
+        L2*math.sin(t2), L1+L2*math.cos(t2))
+    return t1, t2
+
+def fk(t1, t2, bx, by, L1, L2):
+    x1 = bx + L1*math.cos(t1)
+    y1 = by + L1*math.sin(t1)
+    x2 = x1 + L2*math.cos(t1+t2)
+    y2 = y1 + L2*math.sin(t1+t2)
+    return (bx, by), (x1, y1), (x2, y2)
+
+def mv(a, b, n):
+    return np.linspace(a, b, n+1)[1:]
+
+# ═══════════════════════════════════
+#  로봇 파라미터
+# ═══════════════════════════════════
+Abx, Aby = 0.0, 0.0
+AH = (1.7, 0.0);  AP = (1.5, 0.7);  APL = (0.0, 1.68)
+AL1, AL2 = 1.0, 1.5;  AEL = "down";  ASEC = 5.0
+
+Bbx, Bby = -0.4, 0.0
+BH = (-2.1, 0.0);  BP = (-1.9, 0.6);  BPL = (0.0, 1.60)
+BL1, BL2 = 1.0, 1.2;  BEL = "up";  BSEC = 7.0
+
+# ═══════════════════════════════════
+#  타이밍 (20 fps)
+# ═══════════════════════════════════
+FPS = 20
+ANF = [25, 5, 30, 5, 25, 10];  ATOT = 100   # 5s×20
+BNF = [30, 5, 43, 6, 40, 16];  BTOT = 140   # 7s×20
+PH = ["HOME->PICK","PICK-UP","PICK->PLACE",
+      "PLACE","PLACE->HOME","HOME(wait)"]
+
+SIM = 35.0;  TF = int(SIM * FPS)  # 700 frames
+NA = 7;  NB = 5
+
+print("=" * 55)
+print(f"  {SIM:.0f}s simulation  |  {TF} frames @ {FPS}fps")
+print(f"  A: {ASEC:.0f}s × {NA} cycles  starts: "
+      + ", ".join(f"{c*ASEC:.0f}s" for c in range(NA)))
+print(f"  B: {BSEC:.0f}s × {NB} cycles  starts: "
+      + ", ".join(f"{c*BSEC:.0f}s" for c in range(NB)))
+print("=" * 55)
+
+# ═══════════════════════════════════
+#  궤적 생성
+# ═══════════════════════════════════
+def build(bx, by, h, p, pl, L1, L2, el, nf):
+    th, t2h   = ik(*h,  bx, by, L1, L2, el)
+    tp, t2p   = ik(*p,  bx, by, L1, L2, el)
+    tl, t2l   = ik(*pl, bx, by, L1, L2, el)
+    t1 = np.concatenate([
+        mv(th,tp,nf[0]),   np.full(nf[1],tp),
+        mv(tp,tl,nf[2]),   np.full(nf[3],tl),
+        mv(tl,th,nf[4]),   np.full(nf[5],th)])
+    t2 = np.concatenate([
+        mv(t2h,t2p,nf[0]), np.full(nf[1],t2p),
+        mv(t2p,t2l,nf[2]), np.full(nf[3],t2l),
+        mv(t2l,t2h,nf[4]), np.full(nf[5],t2h)])
+    gr = ([False]*nf[0] +
+          [True]*(nf[1]+nf[2]+nf[3]) +
+          [False]*(nf[4]+nf[5]))
+    return t1, t2, gr
+
+a1, a2, ag_ = build(Abx,Aby,AH,AP,APL,AL1,AL2,AEL,ANF)
+b1, b2, bg_ = build(Bbx,Bby,BH,BP,BPL,BL1,BL2,BEL,BNF)
+
+At1 = np.tile(a1, NA);  At2 = np.tile(a2, NA);  Ag = ag_ * NA
+Bt1 = np.tile(b1, NB);  Bt2 = np.tile(b2, NB);  Bg = bg_ * NB
+assert len(At1) == TF and len(Bt1) == TF
+
+def gp(ic, nf):
+    c = 0
+    for n, nm in zip(nf, PH):
+        if ic < c + n: return nm
+        c += n
+    return PH[-1]
+
+# ═══════════════════════════════════
+#  Figure
+# ═══════════════════════════════════
+fig, (ax, axt) = plt.subplots(
+    2, 1, figsize=(11, 8),
+    gridspec_kw={'height_ratios': [4.5, 1]},
+    facecolor='white')
+fig.subplots_adjust(hspace=0.28, left=0.06, right=0.97,
+                     top=0.93, bottom=0.06)
+
+ax.set_aspect("equal")
+ax.set_xlim(-3.4, 3.4);  ax.set_ylim(-1.5, 3.5)
+ax.grid(True, alpha=0.18);  ax.set_facecolor('#fafafa')
+ax.set_xlabel("X (m)", fontsize=9)
+ax.set_ylabel("Y (m)", fontsize=9)
+ax.axhline(0, color='#ccc', lw=0.6)
+ax.axvline(0, color='#ccc', lw=0.6)
+
+ax.plot(Abx, Aby, 's', ms=10, color='#e74c3c', zorder=6)
+ax.text(Abx+0.12, -0.3, "Robot A\nBase", fontsize=6,
+        color='#e74c3c', fontweight='bold')
+ax.plot(Bbx, Bby, 's', ms=10, color='#2980b9', zorder=6)
+ax.text(Bbx-0.12, -0.3, "Robot B\nBase", fontsize=6,
+        color='#2980b9', fontweight='bold', ha='right')
+
+th_ = np.linspace(0, 2*np.pi, 200)
+ax.plot((AL1+AL2)*np.cos(th_), (AL1+AL2)*np.sin(th_),
+        '#e74c3c', lw=0.5, ls='--', alpha=0.10)
+ax.plot(Bbx+(BL1+BL2)*np.cos(th_), Bby+(BL1+BL2)*np.sin(th_),
+        '#2980b9', lw=0.5, ls='--', alpha=0.10)
+
+for pt, nm, c in [
+    (AH,"A-HOME",'#c0392b'), (AP,"A-PICK",'#e74c3c'),
+    (APL,"A-PLACE",'#27ae60'),
+    (BH,"B-HOME",'#2471a3'), (BP,"B-PICK",'#2980b9'),
+    (BPL,"B-PLACE",'#229954')]:
+    ax.plot(*pt, 'o', ms=5, color=c, zorder=5)
+    ax.annotate(nm, pt, textcoords="offset points",
+                xytext=(5,5), fontsize=5.5, color=c, fontweight='bold')
+
+ax.add_patch(FancyBboxPatch((-0.4,1.40), 0.80, 0.40,
+             boxstyle="round,pad=0.05", fc='#27ae6010',
+             ec='#27ae60', lw=1.2, ls='--', zorder=2))
+ax.text(0, 1.88, "ASSEMBLY", fontsize=6, color='#27ae60',
+        ha='center', fontweight='bold')
+
+# 로봇 아티스트
+lnA1, = ax.plot([],[],'o-',lw=5,color='#e74c3c',
+                solid_capstyle='round',zorder=4)
+lnA2, = ax.plot([],[],'o-',lw=4,color='#f1948a',
+                solid_capstyle='round',zorder=4)
+grpA, = ax.plot([],[],'o',ms=13,zorder=6,mec='black',mew=0.8)
+trA,  = ax.plot([],[],lw=0.8,color='#e74c3c',alpha=0.30)
+pdA,  = ax.plot([],[],'s',ms=7,color='#e74c3c',zorder=5,alpha=0)
+
+lnB1, = ax.plot([],[],'o-',lw=5,color='#2980b9',
+                solid_capstyle='round',zorder=4)
+lnB2, = ax.plot([],[],'o-',lw=4,color='#85c1e9',
+                solid_capstyle='round',zorder=4)
+grpB, = ax.plot([],[],'o',ms=13,zorder=6,mec='black',mew=0.8)
+trB,  = ax.plot([],[],lw=0.8,color='#2980b9',alpha=0.30)
+pdB,  = ax.plot([],[],'s',ms=7,color='#2980b9',zorder=5,alpha=0)
+
+stA = ax.text(3.30, 3.30, '', fontsize=8.5, ha='right', va='top',
+              color='#c0392b', fontweight='bold', family='monospace',
+              bbox=dict(boxstyle='round,pad=0.3',
+                        fc='#fff0ed', ec='#e74c3c', lw=1.5))
+stB = ax.text(-3.30, 3.30, '', fontsize=8.5, ha='left', va='top',
+              color='#1a5276', fontweight='bold', family='monospace',
+              bbox=dict(boxstyle='round,pad=0.3',
+                        fc='#ebf5fb', ec='#2980b9', lw=1.5))
+fltxt = ax.text(0.5, 0.45, '', transform=ax.transAxes,
+                fontsize=18, ha='center', va='center',
+                fontweight='bold', alpha=0, zorder=20)
+asytxt = ax.text(0, -1.25, '', fontsize=9, ha='center',
+                  color='#27ae60', fontweight='bold',
+                  bbox=dict(boxstyle='round,pad=0.3',
+                            fc='#eafaf1', ec='#27ae60', lw=1.2))
+
+# 타임라인
+axt.set_xlim(0, SIM);  axt.set_ylim(-0.5, 3.0)
+axt.set_yticks([])
+axt.set_xlabel("Time (s)", fontsize=8)
+axt.set_xticks(range(0, int(SIM)+1, 5))
+axt.set_xticks(range(0, int(SIM)+1, 1), minor=True)
+axt.tick_params(labelsize=7)
+axt.grid(True, axis='x', alpha=0.2, which='minor')
+axt.grid(True, axis='x', alpha=0.5, which='major')
+axt.set_facecolor('#f8f8f8')
+
+for c in range(NA):
+    t0 = c * ASEC
+    axt.barh(2.0, ASEC*0.95, left=t0+ASEC*0.025, height=0.55,
+             color='#e74c3c', alpha=0.20, ec='#e74c3c', lw=0.8)
+    axt.text(t0+ASEC/2, 2.0, f"A#{c+1}", ha='center', va='center',
+             fontsize=6.5, fontweight='bold', color='#c0392b')
+for c in range(NB):
+    t0 = c * BSEC
+    axt.barh(0.8, BSEC*0.95, left=t0+BSEC*0.025, height=0.55,
+             color='#2980b9', alpha=0.20, ec='#2980b9', lw=0.8)
+    axt.text(t0+BSEC/2, 0.8, f"B#{c+1}", ha='center', va='center',
+             fontsize=6.5, fontweight='bold', color='#2471a3')
+axt.text(-0.3, 2.0, "A", fontsize=9, fontweight='bold',
+         color='#e74c3c', va='center')
+axt.text(-0.3, 0.8, "B", fontsize=9, fontweight='bold',
+         color='#2980b9', va='center')
+tlc = axt.axvline(0, color='black', lw=2, zorder=10)
+
+# ═══════════════════════════════════
+#  State
+# ═══════════════════════════════════
+hA = [];  hB = []
+cntA = 0;  cntB = 0;  cntAs = 0
+pvA = "";  pvB = ""
+rdA = False;  rdB = False
+fc = 0;  fm = ""
+
+def update(i):
+    global cntA, cntB, cntAs, pvA, pvB, rdA, rdB, fc, fm
+
+    t = i / FPS
+    iA = i % ATOT;  iB = i % BTOT
+    cyA = i // ATOT + 1;  cyB = i // BTOT + 1
+    tA = iA / FPS;  tB = iB / FPS
+    phA = gp(iA, ANF);  phB = gp(iB, BNF)
+
+    # 플래시
+    if iA == 0 and i > 0:
+        fc = 17
+        fm = f"A CYCLE #{cyA} START! (t={t:.0f}s)"
+        fltxt.set_color('#e74c3c')
+        fltxt.set_bbox(dict(boxstyle='round,pad=0.5',
+                            fc='#fff0ed', ec='#e74c3c', lw=3))
+    if iB == 0 and i > 0:
+        fc = 17
+        fm = f"B CYCLE #{cyB} START! (t={t:.0f}s)"
+        fltxt.set_color('#2980b9')
+        fltxt.set_bbox(dict(boxstyle='round,pad=0.5',
+                            fc='#ebf5fb', ec='#2980b9', lw=3))
+
+    # Robot A
+    bA_, j1A_, eA_ = fk(float(At1[i]), float(At2[i]),
+                         Abx, Aby, AL1, AL2)
+    lnA1.set_data([bA_[0],j1A_[0]], [bA_[1],j1A_[1]])
+    lnA2.set_data([j1A_[0],eA_[0]], [j1A_[1],eA_[1]])
+    grpA.set_data([eA_[0]], [eA_[1]])
+    grpA.set_color('#e74c3c' if Ag[i] else '#ccc')
+    hA.append(eA_)
+    if len(hA) > 100: hA.pop(0)
+    xa, ya = zip(*hA);  trA.set_data(xa, ya)
+    if Ag[i]:
+        pdA.set_data([eA_[0]], [eA_[1]-0.12])
+        pdA.set_alpha(0.85)
+    else:
+        pdA.set_alpha(0)
+
+    # Robot B
+    bB_, j1B_, eB_ = fk(float(Bt1[i]), float(Bt2[i]),
+                         Bbx, Bby, BL1, BL2)
+    lnB1.set_data([bB_[0],j1B_[0]], [bB_[1],j1B_[1]])
+    lnB2.set_data([j1B_[0],eB_[0]], [j1B_[1],eB_[1]])
+    grpB.set_data([eB_[0]], [eB_[1]])
+    grpB.set_color('#2980b9' if Bg[i] else '#ccc')
+    hB.append(eB_)
+    if len(hB) > 140: hB.pop(0)
+    xb, yb = zip(*hB);  trB.set_data(xb, yb)
+    if Bg[i]:
+        pdB.set_data([eB_[0]], [eB_[1]-0.12])
+        pdB.set_alpha(0.85)
+    else:
+        pdB.set_alpha(0)
+
+    # Place 감지
+    if pvA == "PLACE" and phA != "PLACE":
+        cntA += 1;  rdA = True
+    if pvB == "PLACE" and phB != "PLACE":
+        cntB += 1;  rdB = True
+    if rdA and rdB:
+        cntAs += 1;  rdA = False;  rdB = False
+    pvA = phA;  pvB = phB
+
+    # 텍스트 갱신
+    ax.set_title(
+        f"Time: {t:.1f}s / {SIM:.0f}s   |   "
+        f"A: cycle #{cyA} ({tA:.1f}/{ASEC:.0f}s)   |   "
+        f"B: cycle #{cyB} ({tB:.1f}/{BSEC:.0f}s)",
+        fontsize=9.5, fontweight='bold', pad=6)
+
+    stA.set_text(
+        f"Robot A (5s)\n"
+        f"Cycle #{cyA} [{tA:.1f}/{ASEC:.0f}s]\n"
+        f"{phA}\n"
+        f"EE({eA_[0]:+.2f},{eA_[1]:+.2f})\n"
+        f"{'HOLD' if Ag[i] else 'OPEN'}  Place:{cntA}")
+    stB.set_text(
+        f"Robot B (7s)\n"
+        f"Cycle #{cyB} [{tB:.1f}/{BSEC:.0f}s]\n"
+        f"{phB}\n"
+        f"EE({eB_[0]:+.2f},{eB_[1]:+.2f})\n"
+        f"{'HOLD' if Bg[i] else 'OPEN'}  Place:{cntB}")
+
+    if fc > 0:
+        fltxt.set_text(fm)
+        fltxt.set_alpha(min(1, fc / 8))
+        fc -= 1
+    else:
+        fltxt.set_alpha(0)
+
+    wA = "Rdy" if rdA else "wait"
+    wB = "Rdy" if rdB else "wait"
+    asytxt.set_text(
+        f"Assembly: {cntAs}  |  "
+        f"A placed:{cntA}({wA})  B placed:{cntB}({wB})")
+
+    tlc.set_xdata([t])
+
+    # 진행 상황 출력
+    if i % 100 == 0:
+        print(f"  frame {i:4d}/{TF}  t={t:.1f}s  "
+              f"A:cyc#{cyA} B:cyc#{cyB}")
+
+# ═══════════════════════════════════════════
+#  ★★★  MP4 저장 → base64 인라인 재생  ★★★
+#  (to_jshtml 사용하지 않음!)
+# ═══════════════════════════════════════════
+print(f"\n▶ Rendering {TF} frames ...\n")
+
+ani = FuncAnimation(fig, update, frames=TF,
+                    interval=1000//FPS,
+                    blit=False, repeat=False)
+
+# ── Step 1: MP4 저장 ────────────────────
+FNAME = "dual_robot_assembly_35s.mp4"
+try:
+    ani.save(FNAME, writer="ffmpeg", fps=FPS, dpi=120,
+             extra_args=['-vcodec','libx264','-pix_fmt','yuv420p'])
+    fmb = os.path.getsize(FNAME) / (1024*1024)
+    print(f"\n{'='*50}")
+    print(f"  [OK] MP4: {FNAME}  ({fmb:.1f} MB)")
+    print(f"{'='*50}")
+except Exception as e:
+    print(f"ffmpeg 실패: {e}")
+    FNAME = "dual_robot_assembly_35s.gif"
+    print("GIF 저장 중...")
+    ani.save(FNAME, writer="pillow", fps=FPS, dpi=80)
+    fmb = os.path.getsize(FNAME) / (1024*1024)
+    print(f"  [OK] GIF: {FNAME}  ({fmb:.1f} MB)")
+
+plt.close(fig)
+
+# ── Step 2: base64 인라인 재생 ──────────
+#    (★ to_jshtml 대신 video 태그 사용!)
+print("\n▶ 인라인 재생 준비 중...")
+
+with open(FNAME, "rb") as f:
+    b64data = base64.b64encode(f.read()).decode('ascii')
+
+if FNAME.endswith(".mp4"):
+    mime = "video/mp4"
+    player = f"""
+    <div style="text-align:center; padding:10px;
+                background:#f8f8f8; border-radius:8px;">
+      <h3 style="font-family:monospace; color:#333; margin:5px;">
+        Dual Robot Arms — Pick &amp; Place (35s)
+      </h3>
+      <p style="font-family:monospace; font-size:12px; color:#666;">
+        A: 5s cycle × 7 = 35s &nbsp;|&nbsp; B: 7s cycle × 5 = 35s
+      </p>
+      <video width="880" controls autoplay loop
+             style="border:2px solid #ddd; border-radius:4px;">
+        <source src="data:{mime};base64,{b64data}" type="{mime}">
+      </video>
+      <p style="font-family:monospace; font-size:11px; color:#999;">
+        {FNAME} ({fmb:.1f} MB) | {FPS}fps | {TF} frames
+      </p>
+    </div>"""
+else:
+    player = (f'<div style="text-align:center">'
+              f'<img src="data:image/gif;base64,{b64data}" '
+              f'width="880"></div>')
+
+display(HTML(player))
+
+# ── Step 3: 다운로드 안내 ────────────────
+print(f"\n{'='*58}")
+print(f"  ★ 교재 삽입용 파일: {FNAME} ({fmb:.1f} MB)")
+print(f"  ★ 최종 결과: A 7회 place, B 5회 place, 조립 5회")
+print(f"  ★ Colab 다운로드:")
+print(f"      from google.colab import files")
+print(f"      files.download('{FNAME}')")
+print(f"{'='*58}")
+print("\nDone!")
