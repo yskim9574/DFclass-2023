@@ -1,0 +1,351 @@
+# ============================================================
+#  Dual 2-Link Robot Arms  –  Independent Cycling  (v4)
+#  Robot A (5 s) + Robot B (7 s) — 완전 독립 동작
+#  ★ blit=False + 15초(450프레임)으로 안정적 렌더링
+#  Google Colab 전용
+# ============================================================
+# 실행 전:  !pip install pillow  (한 번만)
+# ============================================================
+
+import math, numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from IPython.display import HTML, display
+
+# ═════════════════════════════════════════
+#  기본 함수
+# ═════════════════════════════════════════
+def ik(x, y, bx, by, L1, L2, elbow="down"):
+    dx, dy = x - bx, y - by
+    r2 = dx*dx + dy*dy
+    c2 = max(-1, min(1, (r2 - L1**2 - L2**2) / (2*L1*L2)))
+    t2 = math.acos(c2)
+    if elbow == "up": t2 = -t2
+    t1 = math.atan2(dy, dx) - math.atan2(L2*math.sin(t2), L1+L2*math.cos(t2))
+    return t1, t2
+
+def fk(t1, t2, bx, by, L1, L2):
+    x1 = bx + L1*math.cos(t1);       y1 = by + L1*math.sin(t1)
+    x2 = x1 + L2*math.cos(t1 + t2);  y2 = y1 + L2*math.sin(t1 + t2)
+    return (bx, by), (x1, y1), (x2, y2)
+
+def mv(a, b, n):
+    return np.linspace(a, b, n+1)[1:]
+
+# ═════════════════════════════════════════
+#  로봇 파라미터
+# ═════════════════════════════════════════
+# Robot A  (5 s, elbow-down)
+Abx, Aby = 0.0, 0.0
+A_HOME  = (1.7, 0.0);  A_PICK = (1.5, 0.7);  A_PLACE = (0.0, 1.68)
+AL1, AL2 = 1.0, 1.5;   A_EL = "down"
+A_SEC = 5.0
+
+# Robot B  (7 s, elbow-up)
+Bbx, Bby = -0.4, 0.0
+B_HOME  = (-2.1, 0.0);  B_PICK = (-1.9, 0.6);  B_PLACE = (0.0, 1.60)
+BL1, BL2 = 1.0, 1.2;    B_EL = "up"
+B_SEC = 7.0
+
+# ═════════════════════════════════════════
+#  타이밍
+# ═════════════════════════════════════════
+FPS = 30
+
+# A: 5s × 30 = 150 frames
+A_NF = [38, 7, 45, 7, 38, 15]   # H→P, PICK, P→PL, PLACE, PL→H, WAIT
+A_TOT = sum(A_NF)                # 150
+A_PH_NAMES = ["HOME→PICK", "★ PICK", "PICK→PLACE", "★ PLACE", "PLACE→HOME", "HOME(wait)"]
+
+# B: 7s × 30 = 210 frames
+B_NF = [45, 8, 65, 8, 60, 24]
+B_TOT = sum(B_NF)                # 210
+B_PH_NAMES = A_PH_NAMES.copy()
+
+# ★ 시뮬레이션 = 15초 (450 프레임)
+# A: 3 cycles  (0-5, 5-10, 10-15)
+# B: 2+ cycles (0-7, 7-14, 14-...)
+SIM_SEC = 15.0
+TOTAL_FRAMES = int(SIM_SEC * FPS)   # 450
+
+print(f"SIM: {SIM_SEC}s = {TOTAL_FRAMES} frames")
+print(f"  A: {A_SEC}s cycle → starts at 0, 5, 10 s")
+print(f"  B: {B_SEC}s cycle → starts at 0, 7, 14 s")
+
+# ═════════════════════════════════════════
+#  1사이클 궤적 생성
+# ═════════════════════════════════════════
+def build_cycle(bx, by, home, pick, place, L1, L2, el, nf):
+    th,  t2h  = ik(*home,  bx, by, L1, L2, el)
+    tp,  t2p  = ik(*pick,  bx, by, L1, L2, el)
+    tpl, t2pl = ik(*place, bx, by, L1, L2, el)
+    t1 = np.concatenate([
+        mv(th, tp, nf[0]),     np.full(nf[1], tp),
+        mv(tp, tpl, nf[2]),    np.full(nf[3], tpl),
+        mv(tpl, th, nf[4]),    np.full(nf[5], th),
+    ])
+    t2 = np.concatenate([
+        mv(t2h, t2p, nf[0]),   np.full(nf[1], t2p),
+        mv(t2p, t2pl, nf[2]),  np.full(nf[3], t2pl),
+        mv(t2pl, t2h, nf[4]),  np.full(nf[5], t2h),
+    ])
+    gripper = (
+        [False]*nf[0] + [True]*(nf[1]+nf[2]+nf[3]) + [False]*(nf[4]+nf[5])
+    )
+    return t1, t2, gripper
+
+a1_t1, a1_t2, a1_gr = build_cycle(Abx,Aby,A_HOME,A_PICK,A_PLACE,AL1,AL2,A_EL,A_NF)
+b1_t1, b1_t2, b1_gr = build_cycle(Bbx,Bby,B_HOME,B_PICK,B_PLACE,BL1,BL2,B_EL,B_NF)
+
+# ★★★ tile로 전체 프레임 궤적 → 슬라이싱 ★★★
+A_t1 = np.tile(a1_t1, 4)[:TOTAL_FRAMES]
+A_t2 = np.tile(a1_t2, 4)[:TOTAL_FRAMES]
+A_gr = (a1_gr * 4)[:TOTAL_FRAMES]
+B_t1 = np.tile(b1_t1, 3)[:TOTAL_FRAMES]
+B_t2 = np.tile(b1_t2, 3)[:TOTAL_FRAMES]
+B_gr = (b1_gr * 3)[:TOTAL_FRAMES]
+
+def get_phase(frame_in_cycle, nf, names):
+    cum = 0
+    for n, name in zip(nf, names):
+        if frame_in_cycle < cum + n:
+            return name
+        cum += n
+    return names[-1]
+
+# 검증
+print("\n검증:")
+for t in [0, 5.0, 7.0, 10.0, 14.0]:
+    i = int(t * FPS)
+    if i >= TOTAL_FRAMES: continue
+    iA = i % A_TOT;  iB = i % B_TOT
+    pA = get_phase(iA, A_NF, A_PH_NAMES)
+    pB = get_phase(iB, B_NF, B_PH_NAMES)
+    print(f"  t={t:5.1f}s: A={pA:14s}(iA={iA:3d})  B={pB:14s}(iB={iB:3d})")
+
+# ═════════════════════════════════════════
+#  Figure 구성
+# ═════════════════════════════════════════
+fig, (ax, ax_tl) = plt.subplots(2, 1, figsize=(10, 8),
+                                 gridspec_kw={'height_ratios': [5, 1.2]},
+                                 facecolor='white')
+fig.subplots_adjust(hspace=0.25)
+
+# ── 로봇 뷰 ─────────────────────
+ax.set_aspect("equal")
+ax.set_xlim(-3.5, 3.5);  ax.set_ylim(-1.5, 3.5)
+ax.grid(True, alpha=0.2)
+ax.set_facecolor('#fafafa')
+ax.set_xlabel("X (m)");  ax.set_ylabel("Y (m)")
+
+# 베이스
+ax.plot(Abx, Aby, 's', ms=10, color='#e74c3c', zorder=6)
+ax.plot(Bbx, Bby, 's', ms=10, color='#2980b9', zorder=6)
+
+# 위치 마커 (정적)
+for pt, nm, c in [(A_HOME,"A-HOME",'#e74c3c'),(A_PICK,"A-PICK",'#e74c3c'),
+                   (A_PLACE,"A-PLACE",'#27ae60'),
+                   (B_HOME,"B-HOME",'#2980b9'),(B_PICK,"B-PICK",'#2980b9'),
+                   (B_PLACE,"B-PLACE",'#27ae60')]:
+    ax.plot(*pt, 'o', ms=6, color=c, zorder=5)
+    ax.annotate(nm, pt, textcoords="offset points", xytext=(5,5),
+                fontsize=6.5, color=c, fontweight='bold')
+
+# Workspace circles
+th = np.linspace(0, 2*np.pi, 200)
+ax.plot((AL1+AL2)*np.cos(th),(AL1+AL2)*np.sin(th),'#e74c3c',lw=0.5,ls='--',alpha=0.1)
+ax.plot(Bbx+(BL1+BL2)*np.cos(th),Bby+(BL1+BL2)*np.sin(th),'#2980b9',lw=0.5,ls='--',alpha=0.1)
+
+# ── 로봇 아티스트 ────────────────
+armA1, = ax.plot([],[],  'o-', lw=6, color='#e74c3c', solid_capstyle='round', zorder=4)
+armA2, = ax.plot([],[],  'o-', lw=5, color='#f1948a', solid_capstyle='round', zorder=4)
+gripA, = ax.plot([],[],  'o', ms=14, zorder=6, mec='black', mew=1)
+traceA,= ax.plot([],[],  lw=0.8, color='#e74c3c', alpha=0.3)
+
+armB1, = ax.plot([],[],  'o-', lw=6, color='#2980b9', solid_capstyle='round', zorder=4)
+armB2, = ax.plot([],[],  'o-', lw=5, color='#85c1e9', solid_capstyle='round', zorder=4)
+gripB, = ax.plot([],[],  'o', ms=14, zorder=6, mec='black', mew=1)
+traceB,= ax.plot([],[],  lw=0.8, color='#2980b9', alpha=0.3)
+
+# ★★★ 큰 텍스트 표시들 ★★★
+title_txt = ax.text(0.5, 1.02, '', transform=ax.transAxes, fontsize=12,
+                     ha='center', va='bottom', fontweight='bold')
+
+# 각 로봇 옆에 큰 상태 표시
+statusA_txt = ax.text(3.3, 2.8, '', fontsize=11, ha='right', va='top',
+                       color='#e74c3c', fontweight='bold',
+                       bbox=dict(boxstyle='round,pad=0.4', fc='#ffe8e0', ec='#e74c3c', lw=2))
+statusB_txt = ax.text(-3.3, 2.8, '', fontsize=11, ha='left', va='top',
+                       color='#2980b9', fontweight='bold',
+                       bbox=dict(boxstyle='round,pad=0.4', fc='#dceefb', ec='#2980b9', lw=2))
+
+# ★ 사이클 시작 경고 텍스트 (화면 중앙)
+flash_txt = ax.text(0.5, 0.5, '', transform=ax.transAxes,
+                     fontsize=20, ha='center', va='center',
+                     fontweight='bold', alpha=0, zorder=20)
+
+# ── 타임라인 ─────────────────────
+ax_tl.set_xlim(0, SIM_SEC)
+ax_tl.set_ylim(-0.3, 3.0)
+ax_tl.set_yticks([])
+ax_tl.set_xlabel("Time (s)", fontsize=9)
+ax_tl.set_xticks(range(int(SIM_SEC)+1))
+ax_tl.tick_params(labelsize=7)
+ax_tl.grid(True, axis='x', alpha=0.3)
+ax_tl.set_facecolor('#f8f8f8')
+
+# A 사이클 바 (y=2.0)
+for c in range(3):
+    t0 = c * A_SEC
+    ax_tl.barh(2.0, A_SEC-0.1, left=t0+0.05, height=0.6,
+               color='#e74c3c', alpha=0.25, ec='#e74c3c', lw=1)
+    ax_tl.text(t0+A_SEC/2, 2.0, f"A #{c+1}\n({t0:.0f}~{t0+A_SEC:.0f}s)",
+               ha='center', va='center', fontsize=7, fontweight='bold', color='#c0392b')
+
+# B 사이클 바 (y=0.8)
+for c in range(3):
+    t0 = c * B_SEC
+    t1_end = min(t0+B_SEC, SIM_SEC)
+    ax_tl.barh(0.8, t1_end-t0-0.1, left=t0+0.05, height=0.6,
+               color='#2980b9', alpha=0.25, ec='#2980b9', lw=1)
+    label = f"B #{c+1}\n({t0:.0f}~{t0+B_SEC:.0f}s)"
+    ax_tl.text(t0+(t1_end-t0)/2, 0.8, label,
+               ha='center', va='center', fontsize=7, fontweight='bold', color='#2471a3')
+
+ax_tl.text(-0.4, 2.0, "A", fontsize=10, fontweight='bold', color='#e74c3c', va='center')
+ax_tl.text(-0.4, 0.8, "B", fontsize=10, fontweight='bold', color='#2980b9', va='center')
+
+# 타임라인 커서
+tl_cursor = ax_tl.axvline(0, color='black', lw=2, zorder=10)
+
+# ═════════════════════════════════════════
+#  Animation  (★ blit=False ★)
+# ═════════════════════════════════════════
+histA = [];  histB = []
+count_A = 0;  count_B = 0;  count_assy = 0
+prev_phA = "";  prev_phB = ""
+partA_rdy = False;  partB_rdy = False
+flash_counter = 0;  flash_msg = ""
+
+def update(i):
+    global count_A, count_B, count_assy
+    global prev_phA, prev_phB, partA_rdy, partB_rdy
+    global flash_counter, flash_msg
+
+    t = i / FPS
+
+    # 사이클 내 인덱스 (★ 독립 ★)
+    iA = i % A_TOT
+    iB = i % B_TOT
+    cycA = i // A_TOT + 1
+    cycB = i // B_TOT + 1
+    tA = iA / FPS      # A 사이클 내 경과
+    tB = iB / FPS      # B 사이클 내 경과
+
+    # Phase
+    phA = get_phase(iA, A_NF, A_PH_NAMES)
+    phB = get_phase(iB, B_NF, B_PH_NAMES)
+
+    # ★ 사이클 시작 감지 → 플래시
+    if iA == 0 and i > 0:
+        flash_counter = 20
+        flash_msg = f"▶ A CYCLE #{cycA} START!  (t={t:.1f}s)"
+        flash_txt.set_color('#e74c3c')
+        flash_txt.set_bbox(dict(boxstyle='round,pad=0.5', fc='#ffe8e0', ec='#e74c3c', lw=3))
+    if iB == 0 and i > 0:
+        flash_counter = 20
+        flash_msg = f"▶ B CYCLE #{cycB} START!  (t={t:.1f}s)"
+        flash_txt.set_color('#2980b9')
+        flash_txt.set_bbox(dict(boxstyle='round,pad=0.5', fc='#dceefb', ec='#2980b9', lw=3))
+
+    # Robot A
+    bA, j1A, eeA = fk(float(A_t1[i]), float(A_t2[i]), Abx, Aby, AL1, AL2)
+    armA1.set_data([bA[0],j1A[0]], [bA[1],j1A[1]])
+    armA2.set_data([j1A[0],eeA[0]], [j1A[1],eeA[1]])
+    gripA.set_data([eeA[0]], [eeA[1]])
+    gripA.set_color('#e74c3c' if A_gr[i] else '#cccccc')
+    histA.append(eeA)
+    if len(histA) > 120: histA.pop(0)
+    hx, hy = zip(*histA); traceA.set_data(hx, hy)
+
+    # Robot B
+    bB, j1B, eeB = fk(float(B_t1[i]), float(B_t2[i]), Bbx, Bby, BL1, BL2)
+    armB1.set_data([bB[0],j1B[0]], [bB[1],j1B[1]])
+    armB2.set_data([j1B[0],eeB[0]], [j1B[1],eeB[1]])
+    gripB.set_data([eeB[0]], [eeB[1]])
+    gripB.set_color('#2980b9' if B_gr[i] else '#cccccc')
+    histB.append(eeB)
+    if len(histB) > 120: histB.pop(0)
+    hx, hy = zip(*histB); traceB.set_data(hx, hy)
+
+    # Place 감지
+    if prev_phA == "★ PLACE" and phA != "★ PLACE":
+        count_A += 1;  partA_rdy = True
+    if prev_phB == "★ PLACE" and phB != "★ PLACE":
+        count_B += 1;  partB_rdy = True
+    if partA_rdy and partB_rdy:
+        count_assy += 1;  partA_rdy = False;  partB_rdy = False
+    prev_phA = phA;  prev_phB = phB
+
+    # ★ 타이틀 (전체 시간 + 사이클 번호)
+    title_txt.set_text(
+        f"Total: {t:.1f}s / {SIM_SEC:.0f}s    │    "
+        f"A: cycle #{cycA} ({tA:.1f}s/{A_SEC:.0f}s)    │    "
+        f"B: cycle #{cycB} ({tB:.1f}s/{B_SEC:.0f}s)    │    "
+        f"Assembly: {count_assy}")
+
+    # ★ 각 로봇 상태 (큰 텍스트)
+    statusA_txt.set_text(
+        f"ROBOT A  (5s cycle)\n"
+        f"Cycle #{cycA}  [{tA:.1f}s / {A_SEC:.0f}s]\n"
+        f"Phase: {phA}\n"
+        f"θ1={math.degrees(A_t1[i]):+.0f}°  θ2={math.degrees(A_t2[i]):+.0f}°\n"
+        f"EE=({eeA[0]:+.2f}, {eeA[1]:+.2f})\n"
+        f"Grip: {'HOLD●' if A_gr[i] else 'OPEN○'}\n"
+        f"Place: {count_A}")
+
+    statusB_txt.set_text(
+        f"ROBOT B  (7s cycle)\n"
+        f"Cycle #{cycB}  [{tB:.1f}s / {B_SEC:.0f}s]\n"
+        f"Phase: {phB}\n"
+        f"θ1={math.degrees(B_t1[i]):+.0f}°  θ2={math.degrees(B_t2[i]):+.0f}°\n"
+        f"EE=({eeB[0]:+.2f}, {eeB[1]:+.2f})\n"
+        f"Grip: {'HOLD●' if B_gr[i] else 'OPEN○'}\n"
+        f"Place: {count_B}")
+
+    # ★ 플래시 텍스트
+    if flash_counter > 0:
+        flash_txt.set_text(flash_msg)
+        flash_txt.set_alpha(min(1.0, flash_counter / 10))
+        flash_counter -= 1
+    else:
+        flash_txt.set_alpha(0)
+
+    # 타임라인 커서
+    tl_cursor.set_xdata([t])
+
+ani = FuncAnimation(fig, update, frames=TOTAL_FRAMES,
+                    interval=1000//FPS,
+                    blit=False,          # ★★★ blit=False ★★★
+                    repeat=False)        # ★ 반복 안 함
+
+print(f"\n{TOTAL_FRAMES} frames 렌더링 중 (약 1~2분)…")
+html_anim = ani.to_jshtml()
+display(HTML(html_anim))
+
+try:
+    ani.save("dual_robot_v4.mp4", writer="ffmpeg", fps=FPS, dpi=120,
+             extra_args=['-vcodec','libx264','-pix_fmt','yuv420p'])
+    print("[OK] MP4 saved: dual_robot_v4.mp4")
+except Exception as e:
+    print(f"[INFO] MP4 unavailable ({e}), trying GIF…")
+    try:
+        ani.save("dual_robot_v4.gif", writer="pillow", fps=FPS, dpi=80)
+        print("[OK] GIF saved: dual_robot_v4.gif")
+    except:
+        print("[INFO] File save skipped. Animation is displayed above.")
+
+plt.close(fig)
+print("Done.")
