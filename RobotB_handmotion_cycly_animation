@@ -1,0 +1,296 @@
+import math, numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from IPython.display import HTML, display
+
+# ─────────────────────────────────────────
+# IK / FK  (베이스 오프셋 지원)
+# ─────────────────────────────────────────
+def inverse_kinematics(x, y, bx, by, L1, L2, elbow="down"):
+    """월드 좌표 (x,y) → 관절각 (t1,t2).  베이스 위치 (bx,by) 반영."""
+    dx, dy = x - bx, y - by
+    r2 = dx*dx + dy*dy
+    cos_t2 = (r2 - L1*L1 - L2*L2) / (2*L1*L2)
+    cos_t2 = max(-1.0, min(1.0, cos_t2))
+    t2 = math.acos(cos_t2)
+    if elbow == "up":
+        t2 = -t2
+    k1 = L1 + L2*math.cos(t2)
+    k2 = L2*math.sin(t2)
+    t1 = math.atan2(dy, dx) - math.atan2(k2, k1)
+    return t1, t2
+
+def forward_kinematics(t1, t2, bx, by, L1, L2):
+    """관절각 → 월드 좌표 (base, joint1, ee)."""
+    x1 = bx + L1*math.cos(t1);  y1 = by + L1*math.sin(t1)
+    x2 = x1 + L2*math.cos(t1+t2);  y2 = y1 + L2*math.sin(t1+t2)
+    return (bx, by), (x1, y1), (x2, y2)
+
+def move(a, b, n):
+    """A→B 구간 n프레임: 시작점 제외 → 경계 중복 없음."""
+    return np.linspace(a, b, n+1)[1:]
+
+# ─────────────────────────────────────────
+# Robot B parameters
+# ─────────────────────────────────────────
+BASE  = (-0.4, 0.0)   # 베이스 위치 (월드 좌표)
+HOME  = (-2.1, 0.0)   # 대기 위치
+PICK  = (-1.9, 0.6)   # 픽업 위치
+PLACE = ( 0.0, 1.60)  # 조립 위치
+L1, L2     = 1.0, 1.2
+elbow_mode = "up"
+
+# ─────────────────────────────────────────
+# Timing  (7 s @ 30 fps = 210 frames)
+# ─────────────────────────────────────────
+FPS          = 30
+CYCLE_SEC    = 7.0
+TOTAL_FRAMES = int(CYCLE_SEC * FPS)   # 210
+
+F_H2P      = 45   # HOME  → PICK
+F_PICK_DW  =  8   # PICK  정지
+F_P2PL     = 65   # PICK  → PLACE
+F_PLACE_DW =  8   # PLACE 정지
+F_PL2H     = 60   # PLACE → HOME
+F_HOME_DW  = 24   # HOME  대기
+
+assert sum([F_H2P,F_PICK_DW,F_P2PL,F_PLACE_DW,F_PL2H,F_HOME_DW]) == TOTAL_FRAMES
+
+# ─────────────────────────────────────────
+# IK
+# ─────────────────────────────────────────
+bx, by = BASE
+t1h,  t2h  = inverse_kinematics(*HOME,  bx, by, L1, L2, elbow_mode)
+t1pk, t2pk = inverse_kinematics(*PICK,  bx, by, L1, L2, elbow_mode)
+t1pl, t2pl = inverse_kinematics(*PLACE, bx, by, L1, L2, elbow_mode)
+
+print("=== Robot B  (Base offset applied) ===")
+print(f"  Base  : {BASE}")
+print(f"  HOME  : {HOME}  →  θ1={math.degrees(t1h):+7.2f}°  θ2={math.degrees(t2h):+7.2f}°")
+print(f"  PICK  : {PICK}  →  θ1={math.degrees(t1pk):+7.2f}°  θ2={math.degrees(t2pk):+7.2f}°")
+print(f"  PLACE : {PLACE}  →  θ1={math.degrees(t1pl):+7.2f}°  θ2={math.degrees(t2pl):+7.2f}°")
+
+# ─────────────────────────────────────────
+# Joint-angle trajectory
+# ─────────────────────────────────────────
+t1_seg = np.concatenate([
+    move(t1h,  t1pk, F_H2P),
+    np.full(F_PICK_DW,  t1pk),
+    move(t1pk, t1pl, F_P2PL),
+    np.full(F_PLACE_DW, t1pl),
+    move(t1pl, t1h,  F_PL2H),
+    np.full(F_HOME_DW,  t1h),
+])
+t2_seg = np.concatenate([
+    move(t2h,  t2pk, F_H2P),
+    np.full(F_PICK_DW,  t2pk),
+    move(t2pk, t2pl, F_P2PL),
+    np.full(F_PLACE_DW, t2pl),
+    move(t2pl, t2h,  F_PL2H),
+    np.full(F_HOME_DW,  t2h),
+])
+assert len(t1_seg) == TOTAL_FRAMES
+
+phase_labels = (
+    ["HOME → PICK"]  * F_H2P      +
+    ["★ PICK-UP"]    * F_PICK_DW  +
+    ["PICK → PLACE"] * F_P2PL     +
+    ["★ PLACE"]      * F_PLACE_DW +
+    ["PLACE → HOME"] * F_PL2H     +
+    ["HOME  (wait)"] * F_HOME_DW
+)
+gripper_hold = (
+    [False] * F_H2P                                  +
+    [True]  * (F_PICK_DW + F_P2PL + F_PLACE_DW)     +
+    [False] * (F_PL2H + F_HOME_DW)
+)
+
+# ─────────────────────────────────────────
+# Figure
+# ─────────────────────────────────────────
+fig = plt.figure(figsize=(9, 6))
+ax      = fig.add_axes([0.05, 0.12, 0.58, 0.82])
+ax_info = fig.add_axes([0.66, 0.12, 0.32, 0.82])
+ax_prog = fig.add_axes([0.05, 0.03, 0.90, 0.055])
+
+# ── Robot view ──────────────────────────
+ax.set_aspect("equal")
+ax.set_xlim(-3.0, 3.0);  ax.set_ylim(-1.0, 3.0)
+ax.grid(True, alpha=0.3)
+ax.set_title("Robot B  –  Pick & Place  (Base: −0.4, 0)  /  7 s cycle",
+             fontsize=10, fontweight='bold')
+ax.set_xlabel("X (m)");  ax.set_ylabel("Y (m)")
+
+# 원점 표시
+ax.axhline(0, color='lightgray', lw=0.8, zorder=0)
+ax.axvline(0, color='lightgray', lw=0.8, zorder=0)
+
+# Robot A 베이스 참고선 (충돌 방지 확인용)
+ax.plot(0, 0, 's', ms=10, color='gray', alpha=0.4, zorder=3)
+ax.text(0.05, -0.18, "Robot A\nBase(0,0)", fontsize=7,
+        color='gray', alpha=0.6, ha='left')
+
+# Robot B 베이스
+ax.plot(bx, by, 's', ms=12, color='steelblue', zorder=6)
+ax.text(bx-0.05, by-0.22, f"Robot B\nBase({bx},{by})",
+        fontsize=8, color='steelblue', ha='right', fontweight='bold')
+
+# 최대 도달 범위 원 (베이스 중심)
+theta_ws = np.linspace(0, 2*np.pi, 300)
+ax.plot(bx + (L1+L2)*np.cos(theta_ws),
+        by + (L1+L2)*np.sin(theta_ws),
+        'steelblue', lw=0.8, ls='--', alpha=0.30,
+        label=f'Max reach {L1+L2} m')
+
+# 충돌 위험 구역 표시 (두 베이스 사이)
+ax.axvspan(-0.4, 0.0, alpha=0.06, color='red', label='Collision zone')
+ax.text(-0.2, 2.7, 'Collision\nzone', fontsize=7,
+        color='red', alpha=0.6, ha='center')
+
+# 핵심 위치 마커
+pts   = [HOME, PICK, PLACE]
+names = ["HOME", "PICK", "PLACE"]
+cols  = ['royalblue', 'tomato', 'forestgreen']
+haligns = ['right', 'right', 'left']
+for pt, nm, col, ha in zip(pts, names, cols, haligns):
+    ax.scatter(*pt, s=90, zorder=7, color=col)
+    ax.text(pt[0] + (0.07 if ha=='left' else -0.07),
+            pt[1] + 0.09, nm,
+            color=col, fontsize=9, fontweight='bold', ha=ha)
+    ax.text(pt[0], pt[1]-0.22,
+            f"({pt[0]},{pt[1]})",
+            fontsize=7, color='gray', ha='center')
+
+# 링크 정보 박스
+ax.text(0.98, 0.02,
+        f"L1 = {L1} m\nL2 = {L2} m\nMax = {L1+L2} m",
+        transform=ax.transAxes, fontsize=8, va='bottom', ha='right',
+        color='steelblue',
+        bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.8))
+
+# 아티스트
+arm_link1,   = ax.plot([], [], 'o-', lw=5, color='steelblue',   zorder=4)
+arm_link2,   = ax.plot([], [], 'o-', lw=4, color='cornflowerblue', zorder=4)
+ee_trace,    = ax.plot([], [], lw=1.5, color='orange', alpha=0.75, zorder=3)
+gripper_dot, = ax.plot([], [], 'o', ms=13, zorder=6, markeredgecolor='black')
+time_text     = ax.text(-2.9, -0.75, '', fontsize=8, color='dimgray')
+
+# ── Info panel ─────────────────────────
+ax_info.axis('off')
+ax_info.text(0.5, 0.99, "Robot B  Info", ha='center', va='top',
+             fontsize=10, fontweight='bold', transform=ax_info.transAxes)
+info_text = ax_info.text(0.05, 0.90, '', va='top', fontsize=9,
+                          transform=ax_info.transAxes,
+                          linespacing=1.9, family='monospace')
+
+# ── Progress bar ────────────────────────
+ax_prog.set_xlim(0, TOTAL_FRAMES);  ax_prog.set_ylim(0, 1)
+ax_prog.set_xticks([]);             ax_prog.set_yticks([])
+ax_prog.set_facecolor('#eeeeee')
+
+phase_colors = ['#aed6f1','#f1948a','#a9dfbf','#f9e79f','#d7bde2','#abebc6']
+ph_lens      = [F_H2P, F_PICK_DW, F_P2PL, F_PLACE_DW, F_PL2H, F_HOME_DW]
+ph_labels_s  = ['H→P','PICK','P→PL','PLACE','PL→H','WAIT']
+cum = 0
+for fc, fl, lb in zip(phase_colors, ph_lens, ph_labels_s):
+    ax_prog.barh(0.5, fl, left=cum, height=0.75,
+                 color=fc, align='center', alpha=0.65, edgecolor='white')
+    ax_prog.text(cum + fl/2, 0.5, lb,
+                 ha='center', va='center', fontsize=7, fontweight='bold')
+    cum += fl
+prog_bar = ax_prog.barh(0.5, 0, height=0.75, color='navy',
+                         align='center', alpha=0.30)[0]
+
+# ─────────────────────────────────────────
+# Animation
+# ─────────────────────────────────────────
+ee_history = []
+
+def init():
+    arm_link1.set_data([], [])
+    arm_link2.set_data([], [])
+    ee_trace.set_data([], [])
+    gripper_dot.set_data([], [])
+    time_text.set_text('')
+    info_text.set_text('')
+    prog_bar.set_width(0)
+    ee_history.clear()
+    return arm_link1, arm_link2, ee_trace, gripper_dot, time_text, info_text, prog_bar
+
+def update(i):
+    base, j1, ee = forward_kinematics(
+        float(t1_seg[i]), float(t2_seg[i]), bx, by, L1, L2)
+
+    # 링크1: base → j1
+    arm_link1.set_data([base[0], j1[0]], [base[1], j1[1]])
+    # 링크2: j1 → ee
+    arm_link2.set_data([j1[0], ee[0]], [j1[1], ee[1]])
+
+    # EE 궤적
+    ee_history.append(ee)
+    ex, ey = zip(*ee_history)
+    ee_trace.set_data(ex, ey)
+
+    # 그리퍼
+    holding = gripper_hold[i]
+    gripper_dot.set_data([ee[0]], [ee[1]])
+    gripper_dot.set_color('tomato' if holding else 'lightgray')
+
+    # 시간
+    elapsed = i / FPS
+    time_text.set_text(f"Time: {elapsed:.2f} s / {CYCLE_SEC:.1f} s")
+
+    # Info 패널
+    phase = phase_labels[i]
+    t1_now, t2_now = t1_seg[i], t2_seg[i]
+    info_str = (
+        f"Robot    : B\n"
+        f"Base     : ({bx},{by})\n"
+        f"Cycle    : {CYCLE_SEC:.1f} s\n"
+        f"FPS      : {FPS}\n"
+        f"─────────────────\n"
+        f"Phase :\n"
+        f"  {phase}\n"
+        f"Frame : {i+1:3d}/{TOTAL_FRAMES}\n"
+        f"─────────────────\n"
+        f"θ1: {math.degrees(t1_now):+6.1f} deg\n"
+        f"θ2: {math.degrees(t2_now):+6.1f} deg\n"
+        f"─────────────────\n"
+        f"J1: ({j1[0]:+5.3f},\n"
+        f"     {j1[1]:+5.3f})\n"
+        f"EE: ({ee[0]:+5.3f},\n"
+        f"     {ee[1]:+5.3f})\n"
+        f"─────────────────\n"
+        f"Gripper:\n"
+        f"  {'HOLD  ●' if holding else 'OPEN  ○'}"
+    )
+    info_text.set_text(info_str)
+    prog_bar.set_width(i + 1)
+
+    return arm_link1, arm_link2, ee_trace, gripper_dot, time_text, info_text, prog_bar
+
+ani = FuncAnimation(fig, update, frames=TOTAL_FRAMES,
+                    init_func=init, interval=1000/FPS, blit=True)
+
+# ─────────────────────────────────────────
+# Colab 인라인 표시
+# ─────────────────────────────────────────
+html_anim = ani.to_jshtml()
+display(HTML(html_anim))
+
+# ─────────────────────────────────────────
+# 파일 저장
+# ─────────────────────────────────────────
+try:
+    ani.save("robot_B_v2_cycle.mp4", writer="ffmpeg", fps=FPS, dpi=150,
+             extra_args=['-vcodec','libx264','-pix_fmt','yuv420p'])
+    print("[OK] Saved: robot_B_v2_cycle.mp4")
+except Exception as e:
+    print(f"[WARN] MP4 failed ({e})  →  saving GIF ...")
+    ani.save("robot_B_v2_cycle.gif", writer="pillow", fps=FPS, dpi=120)
+    print("[OK] Saved: robot_B_v2_cycle.gif")
+
+plt.close(fig)
+print("Done.")
