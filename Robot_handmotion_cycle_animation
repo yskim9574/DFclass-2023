@@ -1,0 +1,232 @@
+#Robot arm cycle · PY
+
+# ============================================================
+#  2-Link Robot Arm  –  Pick & Place Cycle  (5 s / cycle)
+#  Colab inline animation  –  PLACE pause FULLY FIXED
+# ============================================================
+# Colab 첫 실행 시:  !pip install pillow
+# ============================================================
+
+import math, numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from IPython.display import HTML, display
+
+# ─────────────────────────────────────────
+# IK / FK
+# ─────────────────────────────────────────
+def inverse_kinematics(x, y, L1, L2, elbow="down"):
+    r2 = x*x + y*y
+    cos_t2 = (r2 - L1*L1 - L2*L2) / (2*L1*L2)
+    cos_t2 = max(-1.0, min(1.0, cos_t2))
+    t2 = math.acos(cos_t2)
+    if elbow == "up":
+        t2 = -t2
+    k1 = L1 + L2*math.cos(t2)
+    k2 = L2*math.sin(t2)
+    t1 = math.atan2(y, x) - math.atan2(k2, k1)
+    return t1, t2
+
+def forward_kinematics(t1, t2, L1, L2):
+    x1 = L1*math.cos(t1);  y1 = L1*math.sin(t1)
+    x2 = x1 + L2*math.cos(t1+t2);  y2 = y1 + L2*math.sin(t1+t2)
+    return (0.,0.), (x1,y1), (x2,y2)
+
+# ─────────────────────────────────────────
+# Key positions & robot params
+# ─────────────────────────────────────────
+HOME  = (1.7, 0.0)
+PICK  = (1.5, 0.7)
+PLACE = (0.0, 1.68)
+L1, L2     = 1.0, 1.5
+elbow_mode = "down"
+
+# ─────────────────────────────────────────
+# Timing  (5 s @ 30 fps = 150 frames)
+# ─────────────────────────────────────────
+FPS          = 30
+CYCLE_SEC    = 5.0
+TOTAL_FRAMES = int(CYCLE_SEC * FPS)   # 150
+
+# Phase 프레임 수 (합 = 150)
+F_H2P      = 38   # HOME  → PICK
+F_PICK_DW  =  7   # PICK  정지 (픽업)
+F_P2PL     = 45   # PICK  → PLACE
+F_PLACE_DW =  7   # PLACE 정지 (적재)
+F_PL2H     = 38   # PLACE → HOME
+F_HOME_DW  = 15   # HOME  대기
+
+assert sum([F_H2P,F_PICK_DW,F_P2PL,F_PLACE_DW,F_PL2H,F_HOME_DW]) == TOTAL_FRAMES
+
+# ─────────────────────────────────────────
+# IK
+# ─────────────────────────────────────────
+t1h,  t2h  = inverse_kinematics(*HOME,  L1, L2, elbow=elbow_mode)
+t1pk, t2pk = inverse_kinematics(*PICK,  L1, L2, elbow=elbow_mode)
+t1pl, t2pl = inverse_kinematics(*PLACE, L1, L2, elbow=elbow_mode)
+
+# ─────────────────────────────────────────
+# ★ 핵심 수정: 이동 구간을 linspace(n+1)[1:] 로 생성
+#
+#  linspace(A, B, N, endpoint=False) 의 [0] 번째 값은 A 자체
+#  → dwell 마지막 프레임과 값이 같아 추가 정지처럼 보임
+#
+#  해결: linspace(A, B, N+1)[1:] 사용
+#       → A를 포함하지 않고 B 방향으로 바로 출발
+# ─────────────────────────────────────────
+def move(start, end, n):
+    """A→B 구간 n프레임: 시작점(A) 제외, 끝점(B) 제외"""
+    return np.linspace(start, end, n+1)[1:]   # [1:] → start 값 건너뜀
+
+t1_seg = np.concatenate([
+    move(t1h,  t1pk, F_H2P),          # HOME→PICK   (start=HOME 제외)
+    np.full(F_PICK_DW,  t1pk),         # dwell PICK
+    move(t1pk, t1pl, F_P2PL),          # PICK→PLACE
+    np.full(F_PLACE_DW, t1pl),         # dwell PLACE
+    move(t1pl, t1h,  F_PL2H),          # PLACE→HOME  ★중복 없음
+    np.full(F_HOME_DW,  t1h),          # dwell HOME
+])
+t2_seg = np.concatenate([
+    move(t2h,  t2pk, F_H2P),
+    np.full(F_PICK_DW,  t2pk),
+    move(t2pk, t2pl, F_P2PL),
+    np.full(F_PLACE_DW, t2pl),
+    move(t2pl, t2h,  F_PL2H),
+    np.full(F_HOME_DW,  t2h),
+])
+
+assert len(t1_seg) == TOTAL_FRAMES, f"Length: {len(t1_seg)}"
+
+# Phase / gripper per frame
+phase_labels = (
+    ["HOME → PICK"]  * F_H2P      +
+    ["★ PICK-UP"]    * F_PICK_DW  +
+    ["PICK → PLACE"] * F_P2PL     +
+    ["★ PLACE"]      * F_PLACE_DW +
+    ["PLACE → HOME"] * F_PL2H     +
+    ["HOME  (wait)"] * F_HOME_DW
+)
+gripper_hold = (
+    [False] * F_H2P                                    +
+    [True]  * (F_PICK_DW + F_P2PL + F_PLACE_DW)       +
+    [False] * (F_PL2H + F_HOME_DW)
+)
+
+# ─────────────────────────────────────────
+# Figure
+# ─────────────────────────────────────────
+fig = plt.figure(figsize=(9, 6))
+ax      = fig.add_axes([0.05, 0.12, 0.58, 0.82])
+ax_info = fig.add_axes([0.66, 0.12, 0.32, 0.82])
+ax_prog = fig.add_axes([0.05, 0.03, 0.90, 0.055])
+
+ax.set_aspect("equal"); ax.set_xlim(-2.7,2.7); ax.set_ylim(-2.7,2.7)
+ax.grid(True, alpha=0.3)
+ax.set_title("2-Link Robot Arm  –  Pick & Place Cycle", fontsize=11, fontweight='bold')
+ax.set_xlabel("X (m)"); ax.set_ylabel("Y (m)")
+
+theta_ws = np.linspace(0, 2*np.pi, 300)
+ax.plot((L1+L2)*np.cos(theta_ws),(L1+L2)*np.sin(theta_ws),
+        'gray', lw=0.8, ls='--', alpha=0.35)
+
+ax.scatter([HOME[0],PICK[0],PLACE[0]],[HOME[1],PICK[1],PLACE[1]],
+           s=90, zorder=5, c=['royalblue','tomato','forestgreen'])
+ax.text(HOME[0]+0.07,  HOME[1]-0.18, "HOME",  color='royalblue',   fontsize=9, fontweight='bold')
+ax.text(PICK[0]+0.07,  PICK[1]+0.06, "PICK",  color='tomato',      fontsize=9, fontweight='bold')
+ax.text(PLACE[0]+0.07, PLACE[1]+0.06,"PLACE", color='forestgreen', fontsize=9, fontweight='bold')
+
+arm_line,    = ax.plot([], [], 'o-', lw=4, color='steelblue', zorder=4)
+ee_trace,    = ax.plot([], [], lw=1.5, color='orange', alpha=0.75, zorder=3)
+gripper_dot, = ax.plot([], [], 'o', ms=13, zorder=6, markeredgecolor='black')
+time_text     = ax.text(-2.55, -2.45, '', fontsize=8, color='dimgray')
+
+ax_info.axis('off')
+ax_info.text(0.5, 0.97, "Process Info", ha='center', va='top',
+             fontsize=10, fontweight='bold', transform=ax_info.transAxes)
+info_text = ax_info.text(0.05, 0.88, '', va='top', fontsize=9,
+                          transform=ax_info.transAxes,
+                          linespacing=1.9, family='monospace')
+
+ax_prog.set_xlim(0, TOTAL_FRAMES); ax_prog.set_ylim(0,1)
+ax_prog.set_xticks([]); ax_prog.set_yticks([])
+ax_prog.set_facecolor('#eeeeee')
+phase_colors = ['#aed6f1','#f1948a','#a9dfbf','#f9e79f','#d7bde2','#abebc6']
+ph_lens      = [F_H2P,F_PICK_DW,F_P2PL,F_PLACE_DW,F_PL2H,F_HOME_DW]
+ph_labels_s  = ['H→P','PICK','P→PL','PLACE','PL→H','WAIT']
+cum = 0
+for fc, fl, lb in zip(phase_colors, ph_lens, ph_labels_s):
+    ax_prog.barh(0.5, fl, left=cum, height=0.75,
+                 color=fc, align='center', alpha=0.6, edgecolor='white')
+    ax_prog.text(cum+fl/2, 0.5, lb, ha='center', va='center',
+                 fontsize=7, fontweight='bold')
+    cum += fl
+prog_bar = ax_prog.barh(0.5, 0, height=0.75, color='navy',
+                         align='center', alpha=0.35)[0]
+
+ee_history = []
+
+# ─────────────────────────────────────────
+# Animation
+# ─────────────────────────────────────────
+def init():
+    arm_line.set_data([],[]); ee_trace.set_data([],[])
+    gripper_dot.set_data([],[]); time_text.set_text('')
+    info_text.set_text(''); prog_bar.set_width(0); ee_history.clear()
+    return arm_line, ee_trace, gripper_dot, time_text, info_text, prog_bar
+
+def update(i):
+    base, j1, ee = forward_kinematics(float(t1_seg[i]), float(t2_seg[i]), L1, L2)
+    arm_line.set_data([base[0],j1[0],ee[0]], [base[1],j1[1],ee[1]])
+    ee_history.append(ee)
+    ex, ey = zip(*ee_history)
+    ee_trace.set_data(ex, ey)
+    holding = gripper_hold[i]
+    gripper_dot.set_data([ee[0]], [ee[1]])
+    gripper_dot.set_color('tomato' if holding else 'lightgray')
+    elapsed = i / FPS
+    time_text.set_text(f"Time: {elapsed:.2f} s / {CYCLE_SEC:.1f} s")
+    phase = phase_labels[i]
+    info_str = (
+        f"Cycle time : {CYCLE_SEC:.1f} s\n"
+        f"FPS        : {FPS}\n"
+        f"───────────────────\n"
+        f"Phase  : {phase}\n"
+        f"Frame  : {i+1:3d} / {TOTAL_FRAMES}\n"
+        f"───────────────────\n"
+        f"θ₁ : {math.degrees(t1_seg[i]):+6.1f} deg\n"
+        f"θ₂ : {math.degrees(t2_seg[i]):+6.1f} deg\n"
+        f"───────────────────\n"
+        f"EE X : {ee[0]:+5.3f} m\n"
+        f"EE Y : {ee[1]:+5.3f} m\n"
+        f"───────────────────\n"
+        f"Gripper:\n"
+        f"  {'HOLD  ●' if holding else 'OPEN  ○'}"
+    )
+    info_text.set_text(info_str)
+    prog_bar.set_width(i+1)
+    return arm_line, ee_trace, gripper_dot, time_text, info_text, prog_bar
+
+ani = FuncAnimation(fig, update, frames=TOTAL_FRAMES,
+                    init_func=init, interval=1000/FPS, blit=True)
+
+# ─────────────────────────────────────────
+# Colab 인라인 표시  +  파일 저장
+# ─────────────────────────────────────────
+html_anim = ani.to_jshtml()
+display(HTML(html_anim))
+
+try:
+    ani.save("/mnt/user-data/outputs/robot_arm_cycle_v3.mp4",
+             writer="ffmpeg", fps=FPS, dpi=150,
+             extra_args=['-vcodec','libx264','-pix_fmt','yuv420p'])
+    print("[OK] MP4 saved.")
+except Exception as e:
+    print(f"[WARN] MP4 failed ({e}) → saving GIF...")
+    ani.save("/mnt/user-data/outputs/robot_arm_cycle_v3.gif",
+             writer="pillow", fps=FPS, dpi=120)
+    print("[OK] GIF saved.")
+
+plt.close(fig)
+print("Done.")
