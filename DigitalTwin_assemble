@@ -1,0 +1,124 @@
+!pip install simpy
+
+import simpy
+import random
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import os # Import the os module
+
+# ── 통계 저장 딕셔너리 ──────────────────────────────
+stats = {
+    "Machine_A": {"produced": 0, "defective": 0, "times": []},
+    "Machine_B": {"produced": 0, "defective": 0, "times": []},
+    "Assembly":  {"completed": 0, "times": []}
+}
+
+DEFECT_RATE = 0.10  # 불량률 10%
+
+# ── 기계 프로세스 ────────────────────────────────────
+def machine_process(env, name, process_time, out_queue):
+    while True:
+        yield env.timeout(process_time)
+        stats[name]["produced"] += 1
+
+        # 불량 판정
+        if random.random() < DEFECT_RATE:
+            stats[name]["defective"] += 1
+            print(f"[{env.now:5.1f}s] ⚠️  {name} → 불량품 발생 (폐기)")
+            continue  # 불량품은 큐에 넣지 않음
+
+        part_id = f"{name}_part_{int(env.now)}"
+        stats[name]["times"].append(env.now)
+        print(f"[{env.now:5.1f}s] ✅ {name} → {part_id} 생산 완료 → queue 적재")
+        out_queue.put(part_id)
+
+# ── 조립 프로세스 ────────────────────────────────────
+def assembly_process(env, in_queues, assembly_time):
+    while True:
+        parts = []
+        for q in in_queues:
+            part = yield q.get()
+            parts.append(part)
+        print(f"[{env.now:5.1f}s] 🔧 조립 시작: {parts}")
+        yield env.timeout(assembly_time)
+        stats["Assembly"]["completed"] += 1
+        stats["Assembly"]["times"].append(env.now)
+        print(f"[{env.now:5.1f}s] 🏁 조립 완료 → 완제품 #{stats['Assembly']['completed']}")
+
+# ── 시뮬레이션 설정 ──────────────────────────────────
+random.seed(42)
+env    = simpy.Environment()
+queue1 = simpy.Store(env)
+queue2 = simpy.Store(env)
+
+env.process(machine_process(env, "Machine_A", process_time=5,  out_queue=queue1))
+env.process(machine_process(env, "Machine_B", process_time=7,  out_queue=queue2))
+env.process(assembly_process(env, in_queues=[queue1, queue2],  assembly_time=3))
+
+env.run(until=100)
+
+# ── 통계 출력 ────────────────────────────────────────
+print("\n" + "="*50)
+print("📊 생산 통계 요약")
+print("="*50)
+for machine in ["Machine_A", "Machine_B"]:
+    s = stats[machine]
+    good = s["produced"] - s["defective"]
+    rate = s["defective"] / s["produced"] * 100 if s["produced"] > 0 else 0
+    print(f"\n▶ {machine}")
+    print(f"   총 생산 : {s['produced']} 개")
+    print(f"   양품    : {good} 개")
+    print(f"   불량품  : {s['defective']} 개  (불량률 {rate:.1f}%)者に)")
+print(f"\n▶ Assembly")
+print(f"   완제품 총 생산 : {stats['Assembly']['completed']} 개")
+print("="*50)
+
+# ── Visualization ──────────────────────────────────────
+fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+fig.suptitle("Digital Twin - Manufacturing Simulation", fontsize=14, fontweight='bold')
+
+# Graph 1: Production count (Good vs Defective)
+machines      = ["Machine_A", "Machine_B"]
+good_counts   = [stats[m]["produced"] - stats[m]["defective"] for m in machines]
+defect_counts = [stats[m]["defective"] for m in machines]
+
+x = range(len(machines))
+axes[0].bar(x, good_counts,   label="Good Parts",     color="steelblue")
+axes[0].bar(x, defect_counts, label="Defective Parts", color="tomato", bottom=good_counts)
+axes[0].set_xticks(x)
+axes[0].set_xticklabels(machines)
+axes[0].set_title("Production Count (Good vs Defective)")
+axes[0].set_ylabel("Quantity (pcs)")
+axes[0].legend()
+
+# Graph 2: Defect rate comparison
+rates = [stats[m]["defective"] / stats[m]["produced"] * 100
+         if stats[m]["produced"] > 0 else 0 for m in machines]
+bars = axes[1].bar(machines, rates, color=["steelblue", "darkorange"])
+axes[1].axhline(y=DEFECT_RATE * 100, color='red', linestyle='--', 
+                label=f"Target Defect Rate {DEFECT_RATE*100:.0f}%")
+axes[1].set_title("Defect Rate Comparison")
+axes[1].set_ylabel("Defect Rate (%)")
+axes[1].legend()
+for bar, rate in zip(bars, rates):
+    axes[1].text(bar.get_x() + bar.get_width() / 2,
+                 bar.get_height() + 0.3, f"{rate:.1f}%", ha='center')
+
+# Graph 3: Cumulative finished products over time
+axes[2].step(stats["Assembly"]["times"],
+             range(1, stats["Assembly"]["completed"] + 1),
+             color="green", linewidth=2)
+axes[2].set_title("Cumulative Finished Products Over Time")
+axes[2].set_xlabel("Simulation Time (sec)")
+axes[2].set_ylabel("Cumulative Finished Products (pcs)")
+axes[2].grid(True, alpha=0.3)
+
+plt.tight_layout()
+
+# Create the directory if it does not exist
+output_dir = "/mnt/user-data/outputs/"
+os.makedirs(output_dir, exist_ok=True)
+
+plt.savefig(os.path.join(output_dir, "digital_twin_result.png"), dpi=150, bbox_inches='tight')
+plt.show()
+print("Figure saved.")
