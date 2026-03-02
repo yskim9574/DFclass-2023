@@ -140,14 +140,14 @@ for pt, nm, c in [
     (APL,"A-PLACE",'#27ae60'),
     (BH,"B-HOME",'#2471a3'), (BP,"B-PICK",'#2980b9'),
     (BPL,"B-PLACE",'#229954')]:
-    ax.plot(*pt, 'o', ms=5, color=c, zorder=5)
+    ax.plot(*pt, 'o', ms=8, color=c, zorder=5)
     ax.annotate(nm, pt, textcoords="offset points",
-                xytext=(5,5), fontsize=5.5, color=c, fontweight='bold')
+                xytext=(6,6), fontsize=10, color=c, fontweight='bold')
 
-ax.add_patch(FancyBboxPatch((-0.4,1.40), 0.80, 0.40,
-             boxstyle="round,pad=0.05", fc='#27ae6010',
+ax.add_patch(FancyBboxPatch((-0.18, 1.80), 0.36, 0.22,
+             boxstyle="round,pad=0.04", fc='#eafaf1',
              ec='#27ae60', lw=1.2, ls='--', zorder=2))
-ax.text(0, 1.88, "ASSEMBLY", fontsize=6, color='#27ae60',
+ax.text(0, 2.06, "ASSEMBLY", fontsize=10, color='#27ae60',
         ha='center', fontweight='bold')
 
 # 로봇 아티스트
@@ -175,8 +175,7 @@ stB = ax.text(-3.30, 3.30, '', fontsize=8.5, ha='left', va='top',
               color='#1a5276', fontweight='bold', family='monospace',
               bbox=dict(boxstyle='round,pad=0.3',
                         fc='#ebf5fb', ec='#2980b9', lw=1.5))
-fltxt = ax.text(0.5, 0.45, '', transform=ax.transAxes,
-                fontsize=18, ha='center', va='center',
+fltxt = ax.text(0.0, 2.45, '', fontsize=12, ha='center', va='bottom',
                 fontweight='bold', alpha=0, zorder=20)
 asytxt = ax.text(0, -1.25, '', fontsize=9, ha='center',
                   color='#27ae60', fontweight='bold',
