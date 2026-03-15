@@ -1,0 +1,324 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
+from IPython.display import Image, display
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+
+# =========================================================
+# 1. UR5e D-H parameters
+# =========================================================
+d1 = 162.5
+a2 = -425.0
+a3 = -392.2
+d4 = 133.3
+d5 = 99.7
+d6 = 99.6
+
+# =========================================================
+# 2. Pose data from Table 5 (A~H)
+#    [px, py, pz, rx, ry, rz]
+# =========================================================
+poses = {
+    "A(Home)": [135.00, -292.13, 523.81,  2.22, -2.19,  0.022],
+    "B":       [-256.31, -213.52, 255.33, 2.22, -2.18,  0.040],
+    "C":       [-255.12, -220.86, 166.42, 2.22, -2.22, -0.021],
+    "D":       [-265.84, -375.95, 241.53, 2.22, -2.21,  0.021],
+    "E":       [-265.72, -375.91, 163.90, 2.21, -2.22,  0.021],
+    "F":       [  29.16, -388.82, 536.41, 3.14, -0.001, -0.032],
+    "G":       [ 230.32, -288.63, 612.22, 3.01, -0.011,  0.094],
+    "H":       [ 250.10, -344.72, 417.03, 3.14, -0.031,  0.001],
+}
+labels = list(poses.keys())
+
+# =========================================================
+# 3. Rotation vector -> rotation matrix
+# =========================================================
+def rotvec_to_R(rx, ry, rz):
+    r = np.array([rx, ry, rz], dtype=float)
+    theta = np.linalg.norm(r)
+    if theta < 1e-12:
+        return np.eye(3)
+
+    u = r / theta
+    ux, uy, uz = u
+
+    K = np.array([
+        [0,   -uz,  uy],
+        [uz,   0,  -ux],
+        [-uy, ux,   0]
+    ], dtype=float)
+
+    R = np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
+    return R
+
+def pose_to_T(pose):
+    px, py, pz, rx, ry, rz = pose
+    T = np.eye(4)
+    T[:3, :3] = rotvec_to_R(rx, ry, rz)
+    T[:3, 3] = [px, py, pz]
+    return T
+
+# =========================================================
+# 4. Standard D-H transform
+# =========================================================
+def dh(a, alpha, d, theta):
+    c = np.cos(theta)
+    s = np.sin(theta)
+    ca = np.cos(alpha)
+    sa = np.sin(alpha)
+
+    return np.array([
+        [c, -s*ca,  s*sa, a*c],
+        [s,  c*ca, -c*sa, a*s],
+        [0,    sa,    ca,   d],
+        [0,     0,     0,   1]
+    ], dtype=float)
+
+# =========================================================
+# 5. Forward kinematics
+# =========================================================
+def fk_ur5e(q):
+    q1, q2, q3, q4, q5, q6 = q
+
+    A1 = dh(0,        np.pi/2, d1, q1)
+    A2 = dh(a2,       0,       0,  q2)
+    A3 = dh(a3,       0,       0,  q3)
+    A4 = dh(0,        np.pi/2, d4, q4)
+    A5 = dh(0,       -np.pi/2, d5, q5)
+    A6 = dh(0,        0,       d6, q6)
+
+    T = np.eye(4)
+    Ts = [T.copy()]
+    for A in [A1, A2, A3, A4, A5, A6]:
+        T = T @ A
+        Ts.append(T.copy())
+
+    return Ts[-1], Ts
+
+def joint_positions(q):
+    _, Ts = fk_ur5e(q)
+    pts = np.array([T[:3, 3] for T in Ts], dtype=float)  # 7 points
+    return pts
+
+# =========================================================
+# 6. Numerical IK
+# =========================================================
+def wrap_to_pi(x):
+    return (x + np.pi) % (2*np.pi) - np.pi
+
+def pose_error(q, T_target, w_pos=1.0, w_rot=120.0):
+    T_now, _ = fk_ur5e(q)
+    p_now = T_now[:3, 3]
+    p_tar = T_target[:3, 3]
+
+    R_now = T_now[:3, :3]
+    R_tar = T_target[:3, :3]
+
+    R_err = R_tar.T @ R_now
+    e_rot = 0.5 * np.array([
+        R_err[2, 1] - R_err[1, 2],
+        R_err[0, 2] - R_err[2, 0],
+        R_err[1, 0] - R_err[0, 1]
+    ])
+
+    e_pos = p_now - p_tar
+    return np.hstack([w_pos * e_pos, w_rot * e_rot])
+
+def numerical_jacobian(fun, q, eps=1e-6):
+    f0 = fun(q)
+    J = np.zeros((len(f0), len(q)))
+    for i in range(len(q)):
+        dq = np.zeros_like(q)
+        dq[i] = eps
+        fp = fun(q + dq)
+        fm = fun(q - dq)
+        J[:, i] = (fp - fm) / (2 * eps)
+    return J
+
+def ik_solve(T_target, q0=None, max_iter=120, lam=1e-2):
+    if q0 is None:
+        q = np.zeros(6, dtype=float)
+    else:
+        q = np.array(q0, dtype=float)
+
+    for _ in range(max_iter):
+        e = pose_error(q, T_target)
+        if np.linalg.norm(e[:3]) < 1e-3 and np.linalg.norm(e[3:]) < 1e-3:
+            break
+
+        J = numerical_jacobian(lambda x: pose_error(x, T_target), q)
+        H = J.T @ J + (lam**2) * np.eye(6)
+        g = J.T @ e
+        dq = -np.linalg.solve(H, g)
+
+        step = 1.0
+        improved = False
+        current_norm = np.linalg.norm(e)
+
+        for _ in range(12):
+            q_try = wrap_to_pi(q + step * dq)
+            e_try = pose_error(q_try, T_target)
+            if np.linalg.norm(e_try) < current_norm:
+                q = q_try
+                improved = True
+                break
+            step *= 0.5
+
+        if not improved:
+            q = wrap_to_pi(q + 0.1 * dq)
+
+    return wrap_to_pi(q)
+
+# =========================================================
+# 7. Solve IK sequentially
+# =========================================================
+T_targets = {k: pose_to_T(v) for k, v in poses.items()}
+
+# Home 자세 근처 초기값
+q_prev = np.deg2rad(np.array([90, -110, 100, -80, -90, -90], dtype=float))
+q_solutions = {}
+
+for name in labels:
+    q_sol = ik_solve(T_targets[name], q0=q_prev)
+    q_solutions[name] = q_sol
+    q_prev = q_sol.copy()
+
+print("=== IK joint angles for A~H [deg] ===")
+for name in labels:
+    print(name, np.round(np.rad2deg(q_solutions[name]), 3))
+
+print("\n=== FK position errors [mm] ===")
+for name in labels:
+    T_fk, _ = fk_ur5e(q_solutions[name])
+    p_fk = T_fk[:3, 3]
+    p_tar = T_targets[name][:3, 3]
+    err = np.linalg.norm(p_fk - p_tar)
+    print(f"{name:8s}: {err:.6f} mm")
+
+# =========================================================
+# 8. Interpolate joint path
+# =========================================================
+def interpolate_joint_path(q_list, n_per_segment=25):
+    frames = []
+    for i in range(len(q_list) - 1):
+        q0 = q_list[i]
+        q1 = q_list[i + 1]
+        dq = wrap_to_pi(q1 - q0)
+        for t in np.linspace(0, 1, n_per_segment, endpoint=False):
+            qt = wrap_to_pi(q0 + t * dq)
+            frames.append(qt)
+    frames.append(q_list[-1])
+    return frames
+
+q_list = [q_solutions[name] for name in labels]
+frames_q = interpolate_joint_path(q_list, n_per_segment=20)
+
+tcp_pts = np.array([poses[k][:3] for k in labels], dtype=float)
+
+# =========================================================
+# 9. Axis limits from all robot points
+# =========================================================
+all_robot_pts = []
+for q in frames_q:
+    all_robot_pts.append(joint_positions(q))
+all_robot_pts = np.vstack(all_robot_pts)
+
+all_pts = np.vstack([all_robot_pts, tcp_pts])
+
+xmin, ymin, zmin = all_pts.min(axis=0) - 80
+xmax, ymax, zmax = all_pts.max(axis=0) + 80
+
+# =========================================================
+# 10. Create animation
+# =========================================================
+fig = plt.figure(figsize=(8, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+ax.set_xlim(xmin, xmax)
+ax.set_ylim(ymin, ymax)
+ax.set_zlim(max(0, zmin), zmax)
+
+ax.set_xlabel("X [mm]")
+ax.set_ylabel("Y [mm]")
+ax.set_zlabel("Z [mm]")
+ax.set_title("UR5e IK Animation (A → H)")
+ax.grid(True)
+ax.view_init(elev=24, azim=40)
+
+# 목표 TCP 점 표시
+ax.plot(tcp_pts[:, 0], tcp_pts[:, 1], tcp_pts[:, 2], 'ko--', alpha=0.5)
+for p, lab in zip(tcp_pts, labels):
+    ax.text(p[0], p[1], p[2], lab, fontsize=9)
+
+# 초기 로봇 자세
+pts0 = joint_positions(frames_q[0])
+
+robot_line, = ax.plot(
+    pts0[:, 0], pts0[:, 1], pts0[:, 2],
+    '-o', linewidth=3, markersize=6
+)
+
+tcp_trace, = ax.plot(
+    [pts0[-1, 0]], [pts0[-1, 1]], [pts0[-1, 2]],
+    linewidth=2
+)
+
+trace_xyz = [pts0[-1].copy()]
+
+def update(frame_idx):
+    q = frames_q[frame_idx]
+    pts = joint_positions(q)
+
+    robot_line.set_data(pts[:, 0], pts[:, 1])
+    robot_line.set_3d_properties(pts[:, 2])
+
+    tcp = pts[-1]
+    trace_xyz.append(tcp.copy())
+    tr = np.array(trace_xyz)
+
+    tcp_trace.set_data(tr[:, 0], tr[:, 1])
+    tcp_trace.set_3d_properties(tr[:, 2])
+
+    ax.view_init(elev=24, azim=40 + 0.1 * frame_idx)
+    return robot_line, tcp_trace
+
+anim = FuncAnimation(
+    fig, update, frames=len(frames_q),
+    interval=100, blit=False
+)
+
+gif_path = "ur5e_ik_animation_A_to_H.gif"
+anim.save(gif_path, writer=PillowWriter(fps=10))
+plt.close(fig)
+
+# =========================================================
+# 11. Save static trajectory figure
+# =========================================================
+fig2 = plt.figure(figsize=(8, 7))
+ax2 = fig2.add_subplot(111, projection='3d')
+ax2.plot(tcp_pts[:, 0], tcp_pts[:, 1], tcp_pts[:, 2], 'o-', linewidth=2)
+for x, y, z, lab in zip(tcp_pts[:, 0], tcp_pts[:, 1], tcp_pts[:, 2], labels):
+    ax2.text(x, y, z, lab, fontsize=9)
+
+ax2.set_xlim(xmin, xmax)
+ax2.set_ylim(ymin, ymax)
+ax2.set_zlim(max(0, zmin), zmax)
+ax2.set_xlabel("X [mm]")
+ax2.set_ylabel("Y [mm]")
+ax2.set_zlabel("Z [mm]")
+ax2.set_title("UR5e TCP Trajectory (A to H)")
+ax2.grid(True)
+
+png_path = "ur5e_tcp_trajectory_A_to_H.png"
+plt.tight_layout()
+plt.savefig(png_path, dpi=180, bbox_inches="tight")
+plt.close(fig2)
+
+print("\nSaved files:")
+print(gif_path)
+print(png_path)
+
+# =========================================================
+# 12. Display GIF in Colab
+# =========================================================
+display(Image(filename=gif_path))
