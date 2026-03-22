@@ -1,45 +1,48 @@
-import math
+import numpy as np
 
-def calculate_deflection(theta1, theta2, l1, l2, E1, E2, I1, I2, P):
-    # Convert angles from degrees to radians for cosine calculations
-    theta1_rad = math.radians(theta1)
-    theta2_rad = math.radians(theta2)
+def calculate_total_deflection(theta1_deg, theta2_deg, p):
+    # 각도 변환 (deg -> rad)
+    t1 = np.radians(theta1_deg)
+    t12 = np.radians(theta1_deg + theta2_deg)
+    c1, c12 = np.cos(t1), np.cos(t12)
+    
+    # 1. 링크 굽힘에 의한 처짐 (Beam Bending)
+    # Payload(P) 기여분
+    defl_beam_P = (p['P'] / (p['E'] * p['I1'])) * ( (p['L']**3 * c1**2 / 3) + (p['L']**2 * p['L'] * c1 * c12) + (p['L'] * p['L']**2 * c12**2) ) \
+                  + (p['P'] * p['L']**3 * c12**2 / (3 * p['E'] * p['I2']))
+    
+    # 자중(W) 기여분 (간략화된 분포하중 식)
+    defl_beam_W = (p['W1'] * p['L']**3 * c1**2 / (8 * p['E'] * p['I1'])) + \
+                  (p['W2'] * p['L']**3 * c12**2 / (8 * p['E'] * p['I2']))
 
-    # Cosines of the angles and their combinations
-    C1 = math.cos(theta1_rad)
-    C2 = math.cos(theta2_rad)
-    C12 = math.cos(theta1_rad + theta2_rad)
+    # 2. 관절 유연성에 의한 처짐 (Joint Compliance)
+    # 각 관절에 걸리는 토크 계산
+    tau2 = p['P'] * (p['L'] * c12) + p['W2'] * (p['L']/2 * c12)
+    tau1 = p['P'] * (p['L'] * c1 + p['L'] * c12) + p['W1'] * (p['L']/2 * c1) + p['W2'] * (p['L'] * c1 + p['L']/2 * c12)
+    
+    # 관절 미세 회전각 (rad)
+    dt1 = tau1 / p['k1']
+    dt2 = tau2 / p['k2']
+    
+    # 기하학적 처짐 변환 (수평 거리 * 회전각)
+    defl_joint = (p['L'] * c1 + p['L'] * c12) * dt1 + (p['L'] * c12) * dt2
+    
+    return (defl_beam_P + defl_beam_W + defl_joint)
 
-    # Calculating individual deflections
-    d2y = -l2**3 * C12**2 * (8 * P) / (24 * E2 * I2)
-    d1y = -(8 * P * l1**3 * C1**2 + 12 * P * l1**2 * l2 * C1 * C12) / (24 * E1 * I1)
-    A = P * l1 * (l2 * C12 + l1 * C1 / 2)
-    B = P * C12 * l2**2 / 2
-    dy = -A * (l1 * C1 + l2 * C12) / (E1 * I1) - B * (l1 * C1 + 2 * l2 * C12) / (E2 * I2)
+# 논문 데이터 기반 파라미터 설정
+params = {
+    'L': 24.0, 'E': 10e7, 'I1': 1.920, 'I2': 0.289, 'P': 1.021,
+    'W1': 4.4, 'W2': 2.2, # 추정 자중
+    'k1': 7.2e5, # 관절 1 강성 (lb-in/rad) - 논문 결과와 맞추기 위한 추정치
+    'k2': 5.0e5  # 관절 2 강성 (lb-in/rad)
+}
 
-    # Total deflection
-    d = d2y + d1y + dy
-    print('theta1, theta2, d:', theta1, theta2, round(d, 4))
-    print('d2y:', round(d2y, 4))
-    print('d1y:', round(d1y, 4))
-    print('dy:', round(dy, 4))
- 
-    return d
+# 테스트 및 결과 출력
+angles =[(0, 0),(0,22.5),(22.5,-22.5),(22.5,-45),(45,0),(45,-22.5), (45,-45), (45,-67.5)
+,(67.5,-22.5),(67.5,-45),(90,-22.5),(90,-45)]
 
-# Constants
-l1 = 24  # length of link 1 (in)
-l2 = 24  # length of link 2 (in)
-E1 = 10e6  # Young's modulus of link 1 (psi)
-E2 = 10e6  # Young's modulus of link 2 (psi)
-I1 = 1.920  # area moment of inertia of link 1 (in^4)
-I2 = 0.270  # area moment of inertia of link 2 (in^4)
-P = -1.04  # applied load (lb)
-
-# Theta sets
-theta_sets = [(0, 0),(0,22.5),(22.5,-22.5),(22.5,-45),(45,0),(45,-22.5), (45,-45), (45,-67.5),(67.5,-22.5),(67.5,-45),(90,-22.5),(90,-45)]
-
-# Calculating deflections for each set of angles
-deflections = [calculate_deflection(theta1, theta2, l1, l2, E1, E2, I1, I2, P) for theta1, theta2 in theta_sets]
-
-for angle_set, deflection in zip(theta_sets, deflections):
-    print(f"For theta1 = {angle_set[0]}°, theta2 = {angle_set[1]}°: Deflection = {round(deflection,4)} inch")
+print(f"{'Theta1':>8} {'Theta2':>8} | {'Total Defl (in)':>18}")
+print("-" * 40)
+for t1, t2 in angles:
+    res = calculate_total_deflection(t1, t2, params)
+    print(f"{t1:8.1f} {t2:8.1f} | {res:18.5f}")
