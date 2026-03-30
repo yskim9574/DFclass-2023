@@ -1,15 +1,59 @@
-#KUKA Robot Arm simulation
-!pip install pybullet imageio -q
-print("완료!")
+# ════════════════════════════════════════════════
+# KUKA 로봇 시뮬레이터 — 파라미터 통합 버전
+# ════════════════════════════════════════════════
 
-import pybullet as p # Added this import since p is used globally
+!pip install pybullet imageio -q
+
+import pybullet as p
 import pybullet_data
 import numpy as np
 import imageio
 import base64
 from IPython.display import HTML, display
 
-# ── 시뮬레이터 초기화 ──────────────────────
+# ════════════════════════════════════════════════
+# ★★★ 파라미터 설정  ★★★
+# ════════════════════════════════════════════════
+
+# [화면 크기]
+IMG_W        = 640    # 가로 해상도 (클수록 선명, 느림)
+IMG_H        = 480    # 세로 해상도
+
+# [카메라 위치 — 로봇 크기 조절]
+CAM_DISTANCE = 1.6    # 거리 (작을수록 로봇이 크게 보임)
+                      #   1.8 = 작게  /  1.2 = 보통  /  0.8 = 크게
+CAM_YAW      = 45     # 좌우 각도 (0~360도)
+CAM_PITCH    = -25    # 위아래 각도 (음수 = 위에서 내려다봄)
+CAM_TARGET   = [0, 0, 0.5]  # 카메라 중심점 높이
+CAM_FOV      = 50     # 시야각 (작을수록 크게 보임, 기본 60)
+
+# [애니메이션 속도]
+MOVE_STEPS   = 25     # 동작 간 전환 프레임 수
+                      #   10 = 빠름  /  25 = 보통  /  40 = 느리고 부드러움
+GIF_FPS      = 15     # GIF 재생 속도 (프레임/초)
+
+# [반복 설정]
+REPEAT_COUNT = 3      # 전체 시퀀스 반복 횟수
+PAUSE_SEC    = 2.0    # 반복 사이 정지 시간 (초)
+
+#이 코드에서명령어 텍스트 → COMMAND_DICT → 관절 각도
+#실제 VLA 사용 시명령어 + 카메라 이미지 → OpenVLA 신경망 → 관절 각도
+# ════════════════════════════════════════════════
+# ★★★ 명령어 시퀀스 ★★★
+# ════════════════════════════════════════════════
+SEQUENCE = {
+    "초기 자세":        [0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
+    "팔을 들어올려":    [0.0, -1.0,  0.0, -1.5,  0.0,  1.5,  0.0],
+    "왼쪽으로 회전":    [-1.2, 0.5,  0.0, -1.0,  0.0,  0.5,  0.0],
+    "오른쪽으로 회전":  [1.2,  0.5,  0.0, -1.0,  0.0,  0.5,  0.0],
+    "앞으로 뻗어":      [0.0,  0.5,  0.0, -1.0,  0.0,  0.5,  0.0],
+    "팔꿈치를 굽혀":    [0.0,  0.8,  0.0, -2.0,  0.0,  1.0,  0.0],
+    "위로 펴":          [0.0, -1.5,  0.0, -0.5,  0.0,  2.0,  0.0],
+    "초기 자세 (복귀)": [0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
+}
+# ════════════════════════════════════════════════
+
+# ── 시뮬레이터 초기화 ──────────────────────────
 try:
     p.disconnect()
 except:
@@ -20,85 +64,81 @@ p.setAdditionalSearchPath(pybullet_data.getDataPath())
 p.setGravity(0, 0, -9.81)
 p.loadURDF("plane.urdf")
 robotId = p.loadURDF("kuka_iiwa/model.urdf",
-                      basePosition=[0,0,0],
-                      useFixedBase=True)
+                     basePosition=[0,0,0],
+                     useFixedBase=True)
 print(f"로봇 로드 완료 (관절 수: {p.getNumJoints(robotId)})")
 
-# ── 카메라 (해상도 축소!) ──────────────────
-def get_image(w=320, h=240):  # ← 320x240으로 축소
-    vm = p.computeViewMatrix([1.5,1.5,1.2],[0,0,0.5],[0,0,1])
-    pm = p.computeProjectionMatrixFOV(60, w/h, 0.1, 100)
-    _, _, rgb, _, _ = p.getCameraImage(w, h, vm, pm,
-                        renderer=p.ER_TINY_RENDERER)
-    return np.array(rgb, dtype=np.uint8).reshape(h,w,4)[:,:,:3]
+# ── 카메라 이미지 캡처 ─────────────────────────
+def get_image():
+    vm = p.computeViewMatrixFromYawPitchRoll(
+        cameraTargetPosition=CAM_TARGET,
+        distance=CAM_DISTANCE,
+        yaw=CAM_YAW, pitch=CAM_PITCH, roll=0,
+        upAxisIndex=2)
+    pm = p.computeProjectionMatrixFOV(
+        fov=CAM_FOV, aspect=IMG_W/IMG_H,
+        nearVal=0.1, farVal=100.0)
+    _, _, rgb, _, _ = p.getCameraImage(
+        IMG_W, IMG_H, vm, pm,
+        renderer=p.ER_TINY_RENDERER)
+    return np.array(rgb,dtype=np.uint8).reshape(IMG_H,IMG_W,4)[:,:,:3]
 
-# ── 관절 이동 ──────────────────────────────
-def move_to(target, steps=20):  # ← steps 20으로 축소
+# ── 관절 이동 ──────────────────────────────────
+def move_to(target_angles, steps=MOVE_STEPS):
     frames = []
     nj = p.getNumJoints(robotId)
     curr = [p.getJointState(robotId,i)[0] for i in range(nj)]
     for s in range(steps):
         t = s / steps
-        for i in range(min(len(target), nj)):
-            angle = curr[i] + t*(target[i]-curr[i])
-            p.setJointMotorControl2(robotId, i,
+        for i in range(min(len(target_angles), nj)):
+            p.setJointMotorControl2(
+                robotId, i,
                 p.POSITION_CONTROL,
-                targetPosition=angle, force=500)
+                targetPosition=curr[i]+t*(target_angles[i]-curr[i]),
+                force=500)
         p.stepSimulation()
         frames.append(get_image())
     return frames
 
-#이 코드에서는 명령어 텍스트 → COMMAND_DICT → 관절 각도 
-#실제 VLA에서는 명령어 + 카메라 이미지 → OpenVLA 신경망 → 관절 각도   
+# ── 정지 프레임 ────────────────────────────────
+def make_pause(sec=PAUSE_SEC):
+    n = int(GIF_FPS * sec)
+    img = get_image()
+    return [img] * n
 
-# ── 명령어 사전 ────────────────────────────
-CMDS = {
-    "초기 자세":       [0.0,  0.0,  0.0, 0.0, 0.0, 0.0, 0.0],
-    "팔을 들어올려":   [0.0, -1.0,  0.0,-1.5, 0.0, 1.5, 0.0],
-    "왼쪽으로 회전":   [-1.2, 0.5,  0.0,-1.0, 0.0, 0.5, 0.0],
-    "오른쪽으로 회전": [1.2,  0.5,  0.0,-1.0, 0.0, 0.5, 0.0],
-    "앞으로 뻗어":     [0.0,  0.5,  0.0,-1.0, 0.0, 0.5, 0.0]
-}
-
-# ── 실행 ───────────────────────────────────
+# ── 전체 실행 ──────────────────────────────────
 all_frames = []
-for cmd, angles in CMDS.items():
-    print(f"실행 중: {cmd}")
-    all_frames.extend(move_to(angles, steps=20))
+print(f"\n반복 {REPEAT_COUNT}회 / 정지 {PAUSE_SEC}초 / "
+      f"카메라 거리 {CAM_DISTANCE} / FOV {CAM_FOV}")
+print("="*45)
 
-print(f"총 {len(all_frames)}프레임 생성 완료")
+for rep in range(REPEAT_COUNT):
+    print(f"\n▶ [{rep+1}/{REPEAT_COUNT}회차]")
+    for cmd, angles in SEQUENCE.items():
+        print(f"    └ {cmd}")
+        all_frames.extend(move_to(angles))
+
+    if rep < REPEAT_COUNT - 1:
+        print(f"    ⏸  {PAUSE_SEC}초 정지")
+        all_frames.extend(make_pause(PAUSE_SEC))
+
+total_sec = len(all_frames) / GIF_FPS
+print(f"\n총 {len(all_frames)}프레임 ({total_sec:.1f}초)")
+
+# ── GIF 저장 & 표시 ────────────────────────────
 print("GIF 저장 중...")
-
-# ── GIF 저장 및 표시 ───────────────────────
-imageio.mimsave("robot.gif", all_frames, fps=15)
+imageio.mimsave("robot.gif", all_frames, fps=GIF_FPS)
 
 with open("robot.gif","rb") as f:
     b64 = base64.b64encode(f.read()).decode()
-display(HTML(f'<img src="data:image/gif;base64,{b64}"/>'))
+
+display(HTML(f"""
+<div style='text-align:center'>
+  <h3>🤖 KUKA 로봇 반복 시뮬레이션</h3>
+  <p>{REPEAT_COUNT}회 반복 · 정지 {PAUSE_SEC}초 · 총 {total_sec:.1f}초</p>
+  <img src='data:image/gif;base64,{b64}'
+       style='width:{IMG_W}px; border:2px solid #aaa; border-radius:8px'/>
+</div>
+"""))
 print("✅ 완료!")
 
-# ── 누락된 함수 정의 ───────────────────────
-def parse_command(command_text):
-    return CMDS.get(command_text, None)
-
-def create_animation(frames, fps=15):
-    print("GIF 저장 중...")
-    # Use a different filename to avoid conflict with the animation of all commands
-    imageio.mimsave("robot_single_command.gif", frames, fps=fps)
-    with open("robot_single_command.gif","rb") as f:
-        b64 = base64.b64encode(f.read()).decode()
-    display(HTML(f'<img src="data:image/gif;base64,{b64}"/>'))
-    print("✅ 단일 명령 실행 완료!")
-
-def run_single_command(command_text):
-    print(f"명령 입력: '{command_text}'")
-    angles = parse_command(command_text)
-    if angles:
-        # Replaced set_joint_angles with the existing move_to function
-        frames = move_to(angles, steps=60) # steps changed to 60 as in original run_single_command
-        create_animation(frames, fps=20)
-    else:
-        print(f"오류: '{command_text}' 명령어는 정의되지 않았습니다.")
-
-# ↓ 이 부분을 바꿔서 실행해보세요
-run_single_command("앞으로 뻗어")
