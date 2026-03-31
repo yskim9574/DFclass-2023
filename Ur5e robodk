@@ -1,105 +1,175 @@
-# ═══════════════════════════════════════════════════════════
-# IK 계산 (기존 코드 유지)
-# ═══════════════════════════════════════════════════════════
-print("\n역기구학(IK) 계산 중...")
-T_targets = {k: pose_to_T(v) for k,v in poses.items()}
-q_prev = np.deg2rad([90,-110,100,-80,-90,-90])
-q_solutions = {}
+"""
+UR5e IK — RoboDK 반복 실행 버전 (1분)
+=======================================
+실행: 도구 → 스크립트 실행(Shift+S) → 이 파일 선택
+"""
 
-for name in labels:
-    q_sol = ik_solve(T_targets[name], q0=q_prev)
-    q_solutions[name] = q_sol
-    q_prev = q_sol.copy()
-    print(f"  {name}: {np.round(np.rad2deg(q_sol),1)}")
+import numpy as np
+import time
 
-# ═══════════════════════════════════════════════════════════
-# 보간 경로 생성 (기존 코드 유지)
-# ═══════════════════════════════════════════════════════════
-def interpolate_joint_path(q_list, n_per_segment=20):
-    frames = []
+from robodk.robolink import *
+from robodk.robomath import *
+
+RDK = Robolink()
+robot = RDK.Item('UR5e', ITEM_TYPE_ROBOT)
+
+if not robot.Valid():
+    raise Exception("UR5e 로봇을 찾을 수 없습니다. 로봇 이름을 확인하세요.")
+print("✅ UR5e 연결 성공!")
+
+# ── D-H 파라미터 ───────────────────────────────────────────
+d1=162.5; a2=-425.0; a3=-392.25; d4=133.3; d5=99.7; d6=99.6
+
+# ── 목표 포즈 ──────────────────────────────────────────────
+poses = {
+    "A(Home)": [135.00, -292.13, 523.81,  2.22, -2.19,  0.022],
+    "B":       [-256.31, -213.52, 255.33, 2.22, -2.18,  0.040],
+    "C":       [-255.12, -220.86, 166.42, 2.22, -2.22, -0.021],
+    "D":       [-265.84, -375.95, 241.53, 2.22, -2.21,  0.021],
+    "E":       [-265.72, -375.91, 163.90, 2.21, -2.22,  0.021],
+    "F":       [  29.16, -388.82, 536.41, 3.14, -0.001, -0.032],
+    "G":       [ 230.32, -288.63, 612.22, 3.01, -0.011,  0.094],
+    "H":       [ 250.10, -344.72, 417.03, 3.14, -0.031,  0.001],
+}
+labels = list(poses.keys())
+
+# ── 수학 함수들 ────────────────────────────────────────────
+def rotvec_to_R(rx,ry,rz):
+    r=np.array([rx,ry,rz],dtype=float)
+    theta=np.linalg.norm(r)
+    if theta<1e-12: return np.eye(3)
+    u=r/theta; ux,uy,uz=u
+    K=np.array([[0,-uz,uy],[uz,0,-ux],[-uy,ux,0]],dtype=float)
+    return np.eye(3)+np.sin(theta)*K+(1-np.cos(theta))*(K@K)
+
+def pose_to_T(pose):
+    px,py,pz,rx,ry,rz=pose
+    T=np.eye(4); T[:3,:3]=rotvec_to_R(rx,ry,rz); T[:3,3]=[px,py,pz]
+    return T
+
+def dh(a,alpha,d,theta):
+    c=np.cos(theta); s=np.sin(theta)
+    ca=np.cos(alpha); sa=np.sin(alpha)
+    return np.array([[c,-s*ca,s*sa,a*c],[s,c*ca,-c*sa,a*s],[0,sa,ca,d],[0,0,0,1]],dtype=float)
+
+def fk_ur5e(q):
+    q1,q2,q3,q4,q5,q6=q
+    T=np.eye(4); Ts=[T.copy()]
+    for A in [dh(0,np.pi/2,d1,q1),dh(a2,0,0,q2),dh(a3,0,0,q3),
+              dh(0,np.pi/2,d4,q4),dh(0,-np.pi/2,d5,q5),dh(0,0,d6,q6)]:
+        T=T@A; Ts.append(T.copy())
+    return Ts[-1],Ts
+
+def wrap_to_pi(x): return (x+np.pi)%(2*np.pi)-np.pi
+
+def pose_error(q,T_target,w_pos=1.0,w_rot=120.0):
+    T_now,_=fk_ur5e(q)
+    R_err=T_target[:3,:3].T@T_now[:3,:3]
+    e_rot=0.5*np.array([R_err[2,1]-R_err[1,2],R_err[0,2]-R_err[2,0],R_err[1,0]-R_err[0,1]])
+    return np.hstack([w_pos*(T_now[:3,3]-T_target[:3,3]),w_rot*e_rot])
+
+def numerical_jacobian(fun,q,eps=1e-6):
+    f0=fun(q); J=np.zeros((len(f0),len(q)))
+    for i in range(len(q)):
+        dq=np.zeros_like(q); dq[i]=eps
+        J[:,i]=(fun(q+dq)-fun(q-dq))/(2*eps)
+    return J
+
+def ik_solve(T_target,q0=None,max_iter=120,lam=1e-2):
+    q=np.zeros(6) if q0 is None else np.array(q0,dtype=float)
+    for _ in range(max_iter):
+        e=pose_error(q,T_target)
+        if np.linalg.norm(e[:3])<1e-3 and np.linalg.norm(e[3:])<1e-3: break
+        J=numerical_jacobian(lambda x:pose_error(x,T_target),q)
+        dq=-np.linalg.solve(J.T@J+(lam**2)*np.eye(6),J.T@e)
+        step=1.0; current_norm=np.linalg.norm(e); improved=False
+        for _ in range(12):
+            q_try=wrap_to_pi(q+step*dq)
+            if np.linalg.norm(pose_error(q_try,T_target))<current_norm:
+                q=q_try; improved=True; break
+            step*=0.5
+        if not improved: q=wrap_to_pi(q+0.1*dq)
+    return wrap_to_pi(q)
+
+def interpolate_joint_path(q_list,n=20):
+    frames=[]
     for i in range(len(q_list)-1):
-        q0=q_list[i]; q1=q_list[i+1]
-        dq=wrap_to_pi(q1-q0)
-        for t in np.linspace(0,1,n_per_segment,endpoint=False):
+        q0=q_list[i]; q1=q_list[i+1]; dq=wrap_to_pi(q1-q0)
+        for t in np.linspace(0,1,n,endpoint=False):
             frames.append(wrap_to_pi(q0+t*dq))
     frames.append(q_list[-1])
     return frames
 
-q_list = [q_solutions[name] for name in labels]
-frames_q = interpolate_joint_path(q_list, n_per_segment=20)
-print(f"\n총 {len(frames_q)}개 보간 프레임 생성 완료")
-
-# ═══════════════════════════════════════════════════════════
-# ★★★ RoboDK API — 타겟 생성 및 시뮬레이션 (변환된 부분) ★★★
-# ═══════════════════════════════════════════════════════════
-
-# ── 기준 좌표계 가져오기 ────────────────────────────────────
-ref_frame = robot.Parent()
-
-# ── 기존 타겟 초기화 ────────────────────────────────────────
-print("\nRoboDK에 타겟 생성 중...")
-robodk_targets = {}
-
+# ── IK 계산 ────────────────────────────────────────────────
+print("IK 계산 중... (잠시 기다려주세요)")
+T_targets={k:pose_to_T(v) for k,v in poses.items()}
+q_prev=np.deg2rad([90,-110,100,-80,-90,-90])
+q_solutions={}
 for name in labels:
-    q_deg = np.rad2deg(q_solutions[name]).tolist()
+    q_sol=ik_solve(T_targets[name],q0=q_prev)
+    q_solutions[name]=q_sol; q_prev=q_sol.copy()
+print("IK 계산 완료!")
 
-    # RoboDK 타겟 생성
-    target = RDK.AddTarget(name, ref_frame, robot)
-    target.setAsJointTarget()               # 관절 타겟으로 설정
-    target.setJoints(q_deg)                 # 관절 각도 설정 (도 단위)
+q_list=[q_solutions[name] for name in labels]
+frames_q=interpolate_joint_path(q_list,n=20)
+print(f"보간 프레임: {len(frames_q)}개")
 
-    robodk_targets[name] = target
-    print(f"  타겟 생성: {name} → {[round(v,1) for v in q_deg]}")
+# ════════════════════════════════════════════════════════════
+# ★★★ 반복 설정 — 여기만 바꾸세요! ★★★
+# ════════════════════════════════════════════════════════════
+REPEAT_MINUTES = 1      # ← 반복할 시간 (분)
+DELAY          = 0.03   # ← 프레임 간격 (초, 작을수록 빠름)
+PAUSE_SEC      = 1.5    # ← 1회 완료 후 정지 시간 (초)
+# ════════════════════════════════════════════════════════════
 
-# ── RoboDK 프로그램 생성 ────────────────────────────────────
-print("\nRoboDK 프로그램 생성 중...")
-prog = RDK.AddProgram('UR5e_IK_A_to_H', robot)
-
-prog.setSpeed(200)          # TCP 속도 (mm/s)
-prog.setSpeedJoints(30)     # 관절 속도 (deg/s)
-prog.setAcceleration(500)   # 가속도
-
-# 각 타겟에 MoveJ 명령 추가
-for name in labels:
-    prog.MoveJ(robodk_targets[name])
-    print(f"  MoveJ 추가: {name}")
-
-print("\n프로그램 생성 완료!")
-
-# ═══════════════════════════════════════════════════════════
-# ★ 시뮬레이션 직접 실행 (관절 각도 순차 전송) ★
-# ═══════════════════════════════════════════════════════════
-print("\n" + "="*45)
-print("  RoboDK 시뮬레이션 시작!")
-print("  로봇이 A → H 순서로 이동합니다")
-print("="*45)
-
-# 렌더링 활성화
 RDK.Render(True)
 
-# 보간된 프레임을 RoboDK에 순차 전송
-DELAY = 0.03    # ← 프레임 간격 (초), 줄이면 빨라짐
+# ── 총 실행 시간 계산 ──────────────────────────────────────
+total_seconds = REPEAT_MINUTES * 60
+one_cycle_sec = len(frames_q) * DELAY + PAUSE_SEC
+estimated_cycles = int(total_seconds / one_cycle_sec)
 
-for i, q in enumerate(frames_q):
-    q_deg = np.rad2deg(q).tolist()
-    robot.setJoints(q_deg)          # 관절 각도 직접 설정
-    RDK.Render()                    # 화면 갱신
-    time.sleep(DELAY)
+print("\n" + "="*45)
+print(f"  반복 시작!")
+print(f"  목표 시간   : {REPEAT_MINUTES}분 ({total_seconds}초)")
+print(f"  1회 소요 시간: 약 {one_cycle_sec:.1f}초")
+print(f"  예상 반복 횟수: 약 {estimated_cycles}회")
+print("="*45)
 
-    # 진행 상황 출력
-    if i % 20 == 0:
-        pct = int(100*i/len(frames_q))
-        print(f"  진행: {pct}%  ({i}/{len(frames_q)} 프레임)")
+# ── 반복 실행 ──────────────────────────────────────────────
+start_time = time.time()
+cycle = 0
 
-print("\n✅ 시뮬레이션 완료!")
-print("   스테이션 트리에서 'UR5e_IK_A_to_H' 프로그램을 확인하세요.")
-print("   F5 키로 프로그램을 다시 실행할 수 있습니다.")
+while True:
+    elapsed = time.time() - start_time
 
-# ═══════════════════════════════════════════════════════════
-# FK 오차 확인 (기존 코드 유지)
-# ═══════════════════════════════════════════════════════════
-print("\n=== FK 위치 오차 확인 [mm] ===")
-for name in labels:
-    T_fk,_ = fk_ur5e(q_solutions[name])
-    err = np.linalg.norm(T_fk[:3,3] - T_targets[name][:3,3])
-    print(f"  {name:10s}: {err:.4f} mm")
+    # ── 시간 초과 시 종료 ──────────────────────────────────
+    if elapsed >= total_seconds:
+        break
+
+    cycle += 1
+    remaining = total_seconds - elapsed
+    print(f"\n▶ [{cycle}회차] 남은 시간: {remaining:.0f}초")
+
+    # ── 1회 동작 실행 ──────────────────────────────────────
+    for i, q in enumerate(frames_q):
+        if time.time() - start_time >= total_seconds:
+            break
+        robot.setJoints(np.rad2deg(q).tolist())
+        RDK.Render()
+        time.sleep(DELAY)
+
+    # ── 정지 ───────────────────────────────────────────────
+    if time.time() - start_time < total_seconds:
+        print(f"   ⏸ {PAUSE_SEC}초 정지...")
+        time.sleep(PAUSE_SEC)
+
+# ── 종료 후 홈 자세로 복귀 ────────────────────────────────
+print("\n홈 자세로 복귀 중...")
+q_home = np.rad2deg(q_solutions["A(Home)"]).tolist()
+robot.setJoints(q_home)
+RDK.Render()
+
+print("\n" + "="*45)
+print(f"✅ 완료!  총 {cycle}회 반복 / {elapsed:.0f}초 실행")
+print("="*45)
