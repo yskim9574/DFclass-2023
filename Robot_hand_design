@@ -19,7 +19,9 @@ N = int(T * fps) + 1
 t = np.linspace(0, T, N)
 dt = t[1] - t[0]
 
-# Quintic time scaling (zero vel/acc endpoints)
+
+# Quintic time scaling (zero vel/acc at endpoints by
+# using a fifth-order polynomial as a time function 
 u = t / T
 s = 10*u**3 - 15*u**4 + 6*u**5
 
