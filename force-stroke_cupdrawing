@@ -1,0 +1,278 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ============================================================
+# 1. Input data
+# ============================================================
+
+# Geometry
+rho_d = 5.0       # die shoulder radius, mm
+rho_p = 5.0       # punch radius, mm
+r1 = 26.0         # die-side reference radius, mm
+r2 = 15.0         # punch-side reference radius, mm
+b0 = 38.0         # initial blank radius, mm
+t0 = 0.8          # sheet thickness, mm
+
+# Process condition
+mu = 0.15
+BHF_tonf = 1.0
+BHF = BHF_tonf * 9806.65   # N
+
+# Work hardening law
+# sigma_bar = 53.7 * (0.0123 + epsilon_bar)^0.258
+# 53.7 is treated as kgf/mm^2 and converted to MPa.
+K_kgf_mm2 = 53.7
+K = K_kgf_mm2 * 9.80665    # MPa = N/mm^2
+eps0 = 0.0123
+n = 0.258
+
+
+# ============================================================
+# 2. Material model
+# ============================================================
+
+def flow_stress(eps_bar):
+    """
+    Flow stress using Hollomon-type hardening law.
+    
+    sigma_bar = K * (eps0 + eps_bar)^n
+    
+    Output unit: MPa = N/mm^2
+    """
+    return K * (eps0 + eps_bar) ** n
+
+
+# ============================================================
+# 3. Strain model in flange
+# ============================================================
+
+def eps_theta_exact(r, ro):
+    """
+    Exact circumferential strain in flange:
+    
+    epsilon_theta = ln(r / R)
+    R = sqrt(r^2 + b0^2 - ro^2)
+    """
+    R = np.sqrt(r**2 + b0**2 - ro**2)
+    return np.log(r / R)
+
+
+def eps_bar_equivalent(r, ro):
+    """
+    Equivalent plastic strain in flange.
+    
+    For flange deformation with thickness strain neglected:
+    
+    epsilon_theta = ln(r/R)
+    epsilon_r = -epsilon_theta
+    
+    Equivalent strain:
+    epsilon_bar = 2/sqrt(3) * |epsilon_theta|
+    """
+    eth = eps_theta_exact(r, ro)
+    return 2.0 / np.sqrt(3.0) * np.abs(eth)
+
+
+# ============================================================
+# 4. Flange drawing stress with work hardening
+# ============================================================
+
+def flange_integral(rd, ro, n_points=500):
+    """
+    Calculate:
+    
+    integral from rd to ro of [sigma_bar(r) / r] dr
+    
+    This replaces:
+    
+    sigma_f * ln(ro/rd)
+    
+    in the constant-flow-stress model.
+    """
+    if ro <= rd:
+        return 0.0
+
+    r = np.linspace(rd, ro, n_points)
+    eps_bar = eps_bar_equivalent(r, ro)
+    sigma_bar = flow_stress(eps_bar)
+
+    integrand = sigma_bar / r
+
+    return np.trapezoid(integrand, r)
+
+
+def sigma_c_hardening(rd, ro, phi):
+    """
+    Drawing stress sigma_c including work hardening.
+    
+    sigma_c =
+    [
+        integral(sigma_bar/r dr)
+        + mu*BHF/(pi*ro*t0)
+        + sigma_b*t0/(4*rho_d)
+    ] * exp(mu*phi)
+    + sigma_b*t0/(4*rho_p)
+    
+    The bending/unbending stress sigma_b is approximated using
+    the flow stress at the inner flange radius r = rd.
+    """
+    I_flange = flange_integral(rd, ro)
+
+    eps_bar_inner = eps_bar_equivalent(rd, ro)
+    sigma_b = flow_stress(eps_bar_inner)
+
+    sigma_c = (
+        I_flange
+        + mu * BHF / (np.pi * ro * t0)
+        + sigma_b * t0 / (4.0 * rho_d)
+    ) * np.exp(mu * phi) + sigma_b * t0 / (4.0 * rho_p)
+
+    return sigma_c
+
+
+# ============================================================
+# 5. Stage 1: phi increases from 0 to 80 deg
+# ============================================================
+
+phi1_deg = np.linspace(0.0, 80.0, 161)
+phi1 = np.deg2rad(phi1_deg)
+
+rd1 = r1 - rho_d * np.sin(phi1)
+rp1 = r2 + rho_p * np.sin(phi1)
+
+h1 = (
+    (rho_p + rho_d) * (1.0 - np.cos(phi1))
+    + (rd1 - rp1) * np.tan(phi1)
+)
+
+ro1 = np.sqrt(
+    b0**2
+    - 2.0 * rho_d * (r1 + r2)
+    * (phi1 + np.tan(np.pi / 4.0 - phi1 / 2.0) - 1.0)
+)
+
+sigma_c1 = np.array([
+    sigma_c_hardening(rd, ro, phi)
+    for rd, ro, phi in zip(rd1, ro1, phi1)
+])
+
+P1 = 2.0 * np.pi * rd1 * t0 * sigma_c1 * np.sin(phi1)   # N
+
+
+# ============================================================
+# 6. Stage 2: phi is fixed at 80 deg
+# ============================================================
+
+phi_s_deg = 80.0
+phi_s = np.deg2rad(phi_s_deg)
+
+h_s = h1[-1]
+ro_s = ro1[-1]
+rd_s = rd1[-1]
+rp_s = rp1[-1]
+
+rbar = 0.5 * (rd_s + rp_s)
+
+# Drawing continues until ro becomes approximately rd
+h_final = h_s + (ro_s**2 - rd_s**2) / (2.0 * rbar)
+
+h2 = np.linspace(h_s, h_final, 250)
+ro2 = np.sqrt(ro_s**2 - 2.0 * rbar * (h2 - h_s))
+
+rd2 = np.full_like(h2, rd_s)
+
+sigma_c2 = np.array([
+    sigma_c_hardening(rd, ro, phi_s)
+    for rd, ro in zip(rd2, ro2)
+])
+
+P2 = 2.0 * np.pi * rd2 * t0 * sigma_c2 * np.sin(phi_s)   # N
+
+
+# ============================================================
+# 7. Combine stage 1 and stage 2
+# ============================================================
+
+h_all = np.concatenate([h1, h2[1:]])
+P_all = np.concatenate([P1, P2[1:]])
+
+P_all_kN = P_all / 1000.0
+P_all_tonf = P_all / 9806.65
+
+imax = np.argmax(P_all)
+h_max = h_all[imax]
+P_max_kN = P_all_kN[imax]
+P_max_tonf = P_all_tonf[imax]
+
+
+# ============================================================
+# 8. Print representative results
+# ============================================================
+
+print("==============================================")
+print("Work hardening load-displacement calculation")
+print("==============================================")
+print(f"K = {K:.2f} MPa")
+print(f"eps0 = {eps0}")
+print(f"n = {n}")
+print(f"BHF = {BHF_tonf:.2f} tonf = {BHF/1000:.2f} kN")
+print()
+print(f"Transition depth h_s = {h_s:.3f} mm")
+print(f"Final depth h_final = {h_final:.3f} mm")
+print()
+print(f"Maximum punch load = {P_max_kN:.3f} kN")
+print(f"Maximum punch load = {P_max_tonf:.3f} tonf")
+print(f"Maximum load position h = {h_max:.3f} mm")
+print("==============================================")
+
+print()
+print("Selected results:")
+print(" h [mm]      P [kN]      P [tonf]")
+for h_sample in [0, 2, 4, 6, 8, 10, 12, h_s, 20, 25, 30, h_final]:
+    P_sample = np.interp(h_sample, h_all, P_all_kN)
+    print(f"{h_sample:7.3f}   {P_sample:8.3f}   {P_sample*1000/9806.65:8.3f}")
+
+
+# ============================================================
+# 9. Plot load-displacement curve
+# ============================================================
+
+plt.figure(figsize=(10, 6.5))
+
+plt.plot(
+    h_all,
+    P_all_kN,
+    linewidth=3,
+    label="With work hardening"
+)
+
+plt.axvline(
+    h_s,
+    linestyle=":",
+    linewidth=2,
+    label=f"Transition point h = {h_s:.2f} mm"
+)
+
+plt.scatter(
+    [h_max],
+    [P_max_kN],
+    s=80
+)
+
+plt.text(
+    h_max + 0.5,
+    P_max_kN - 2.0,
+    f"Pmax = {P_max_kN:.2f} kN\nh = {h_max:.2f} mm",
+    fontsize=14
+)
+
+plt.xlabel("Punch depth h (mm)", fontsize=18)
+plt.ylabel("Punch load P (kN)", fontsize=18)
+plt.title("Punch load-displacement curve with work hardening", fontsize=20)
+
+plt.grid(True)
+plt.legend(fontsize=14)
+plt.tick_params(axis="both", labelsize=14)
+plt.tight_layout()
+
+plt.show()
