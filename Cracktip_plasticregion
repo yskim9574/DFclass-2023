@@ -1,0 +1,85 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ============================================================
+# Mode I crack-tip plastic zone size
+# Plane stress and plane strain conditions
+# ============================================================
+
+# -----------------------------
+# Input data
+# -----------------------------
+K_I = 50.0          # Stress intensity factor, MPa*sqrt(m)
+sigma_Y = 500.0    # Yield stress, MPa
+nu = 0.30          # Poisson's ratio
+
+# -----------------------------
+# Angle range
+# theta = 0 : crack growth direction
+# theta = pi and -pi : crack wake direction
+# -----------------------------
+theta = np.linspace(-np.pi, np.pi, 1000)
+
+# -----------------------------
+# Common factor
+# Unit:
+# (K_I / sigma_Y)^2 has unit of m
+# -----------------------------
+C = (1.0 / (4.0 * np.pi)) * (K_I / sigma_Y) ** 2
+
+# -----------------------------
+# Plastic zone radius
+# Plane stress
+# -----------------------------
+r_plane_stress = C * (
+    1.0 + np.cos(theta) + 1.5 * np.sin(theta) ** 2
+)
+
+# -----------------------------
+# Plastic zone radius
+# Plane strain
+# -----------------------------
+r_plane_strain = C * (
+    (1.0 - 2.0 * nu) ** 2 * (1.0 + np.cos(theta))
+    + 1.5 * np.sin(theta) ** 2
+)
+
+# Convert from m to mm
+r_plane_stress_mm = r_plane_stress * 1000.0
+r_plane_strain_mm = r_plane_strain * 1000.0
+
+# -----------------------------
+# Print representative values
+# -----------------------------
+idx_front = np.argmin(np.abs(theta - 0.0))
+
+print("Mode I crack-tip plastic zone size")
+print("----------------------------------")
+print(f"K_I      = {K_I:.2f} MPa√m")
+print(f"sigma_Y  = {sigma_Y:.2f} MPa")
+print(f"nu       = {nu:.2f}")
+print()
+print("At theta = 0 degree, crack growth direction:")
+print(f"Plane stress r_y(0) = {r_plane_stress_mm[idx_front]:.3f} mm")
+print(f"Plane strain r_y(0) = {r_plane_strain_mm[idx_front]:.3f} mm")
+
+# -----------------------------
+# Polar plot
+# -----------------------------
+plt.figure(figsize=(5,5))
+
+ax = plt.subplot(111, projection="polar")
+
+ax.plot(theta, r_plane_stress_mm, label="Plane stress")
+ax.plot(theta, r_plane_strain_mm, label="Plane strain")
+
+ax.set_theta_zero_location("E")   # theta = 0 to the right
+ax.set_theta_direction(-1)        # clockwise positive angle
+
+ax.set_title("Mode I Crack-Tip Plastic Zone", pad=20)
+ax.set_rlabel_position(135)
+ax.set_xlabel("Plastic zone radius, mm")
+
+ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.10))
+
+plt.show()
