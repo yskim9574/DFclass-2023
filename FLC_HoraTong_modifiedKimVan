@@ -192,7 +192,7 @@ plt.figure(figsize=(6, 6))
 plt.plot(e2_all, e1_all, 'k-', linewidth=4, label='Hora-Tong MMFC (Kim-Van, fixed numerics)')
 
 # 가이드 라인 (예시)
-plt.plot([-0.5, 0], [0.5, 0], 'k:', linewidth=1)   # (개념용) pure shear 가이드
+plt.plot([-0.25, 0], [0.5, 0], 'k:', linewidth=1)   # (개념용) pure shear 가이드
 plt.plot([0, 0.6], [0, 0.6], 'k:', linewidth=1)    # biaxial 가이드
 
 plt.title('Forming Limit Diagram', fontsize=26, pad=20)
@@ -201,8 +201,8 @@ plt.ylabel(r'Major Strain $\epsilon_1$', fontsize=24)
 plt.xticks(fontsize=18)
 plt.yticks(fontsize=18)
 
-plt.xlim(-0.2, 0.4)
-plt.ylim(0, 0.5)
+plt.xlim(-0.4, 0.6)
+plt.ylim(0, 1.0)
 plt.gca().set_aspect('equal', adjustable='box')
 plt.grid(True, linestyle='--', alpha=0.5)
 plt.legend(fontsize=14, loc='upper left')
