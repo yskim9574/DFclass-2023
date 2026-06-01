@@ -1,0 +1,383 @@
+import numpy as np
+from scipy.optimize import least_squares
+import matplotlib.pyplot as plt
+
+# ============================================================
+# Kim-Van / J2-J3 anisotropic yield function, 12th order
+# KV12s (symmetric model)
+# 데이터 출처: Kurabara 논문, Int. J. Mater.Form., (2011)
+# Measurement and analysis of differential work hardening
+# behavior of pure titanium sheet using spline function
+# ============================================================
+
+plt.rcParams.update({
+    'font.size': 12,
+    'axes.titlesize': 16,
+    'axes.labelsize': 14,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+    'legend.fontsize': 12,
+    'figure.titlesize': 18
+})
+
+# ------------------------------------------------------------
+# 1. 실험 데이터
+# ------------------------------------------------------------
+angles_deg = np.array([0, 22.5, 45, 67.5, 90])
+
+# sigma_theta / sigma_0
+exp_sigma = np.array([1.0, 1.078, 1.157, 1.258, 1.264])
+
+# r_theta
+exp_r = np.array([1.7, 1.9, 3.7, 4.2, 5.0])
+
+# equi-biaxial yield stress ratio: sigma_b / sigma_0
+exp_sigma_b = 1.449
+
+# equi-biaxial anisotropy coefficient
+exp_r_b = 0.44
+
+# 기준값
+k12 = (1.0 / 3.0) ** 6
+
+
+# ------------------------------------------------------------
+# 2. Kim-Van J2-J3 항복함수 및 미분값 계산
+# ------------------------------------------------------------
+def get_phi_and_derivatives(params, sx, sy, sxy):
+    """
+    sx, sy, sxy : normalized stress components
+    params = [a1,a2,a3,a4,b1,b2,b3,b4,b5,b10,alpha,beta]
+    """
+
+    a1, a2, a3, a4 = params[0:4]
+    b1, b2, b3, b4, b5, b10 = params[4:10]
+    alpha, beta = params[10], params[11]
+
+    # J2^0
+    j20 = (
+        (1.0 / 6.0)
+        * ((a1 + a3) * sx**2 + (a1 + a2) * sy**2 - 2.0 * a1 * sx * sy)
+        + a4 * sxy**2
+    )
+
+    # J3^0
+    j30 = (
+        (1.0 / 27.0) * ((b1 + b2) * sx**3 + (b3 + b4) * sy**3)
+        - (1.0 / 9.0) * (b1 * sx + b4 * sy) * sx * sy
+        + (1.0 / 3.0) * (b5 * sy + (2.0 * b10 - b5) * sx) * sxy**2
+    )
+
+    # 12차 항복함수
+    phi = j20**6 + alpha * j30**4 + beta * (j20**3) * (j30**2)
+
+    # dJ2/dsigma
+    dj2_dsx = ((a1 + a3) / 3.0) * sx - (a1 / 3.0) * sy
+    dj2_dsy = ((a1 + a2) / 3.0) * sy - (a1 / 3.0) * sx
+    dj2_dsxy = 2.0 * a4 * sxy
+
+    # dJ3/dsigma
+    dj3_dsx = (
+        (b1 / 9.0) * (sx - sy) ** 2
+        + (b2 / 9.0) * sx**2
+        - ((b1 + b4) / 9.0) * sy**2
+        + ((2.0 * b10 - b5) / 3.0) * sxy**2
+    )
+
+    dj3_dsy = (
+        (b4 / 9.0) * (sy - sx) ** 2
+        + (b3 / 9.0) * sy**2
+        - ((b1 + b4) / 9.0) * sx**2
+        + (b5 / 3.0) * sxy**2
+    )
+
+    dj3_dsxy = (
+        (2.0 / 3.0)
+        * sxy
+        * (b5 * sy + (2.0 * b10 - b5) * sx)
+    )
+
+    # dphi/dJ2, dphi/dJ3
+    A = 6.0 * j20**5 + 3.0 * beta * j20**2 * j30**2
+    B = 4.0 * alpha * j30**3 + 2.0 * beta * j20**3 * j30
+
+    # dphi/dsigma
+    df_dsx = A * dj2_dsx + B * dj3_dsx
+    df_dsy = A * dj2_dsy + B * dj3_dsy
+    df_dsxy = A * dj2_dsxy + B * dj3_dsxy
+
+    return phi, df_dsx, df_dsy, df_dsxy
+
+
+# ------------------------------------------------------------
+# 3. 예측 함수들
+# ------------------------------------------------------------
+def predict_sigma_theta(params, deg):
+    """
+    단축인장 방향 theta에서 sigma_theta / sigma_0 예측
+    """
+    th = np.radians(deg)
+    c = np.cos(th)
+    s = np.sin(th)
+
+    # 단축인장 응력상태
+    sx = c**2
+    sy = s**2
+    sxy = s * c
+
+    phi, _, _, _ = get_phi_and_derivatives(params, sx, sy, sxy)
+
+    if phi <= 0:
+        return np.nan
+
+    return (phi / k12) ** (-1.0 / 12.0)
+
+
+def predict_r_theta(params, deg):
+    """
+    단축인장 방향 theta에서 r_theta 예측
+    """
+    th = np.radians(deg)
+    c = np.cos(th)
+    s = np.sin(th)
+
+    sx = c**2
+    sy = s**2
+    sxy = s * c
+
+    _, dfx, dfy, dfxy = get_phi_and_derivatives(params, sx, sy, sxy)
+
+    numerator = dfx * s**2 + dfy * c**2 - dfxy * s * c
+    denominator = dfx + dfy
+
+    return -numerator / denominator
+
+
+def predict_sigma_b(params):
+    """
+    등2축 항복응력 sigma_b / sigma_0 예측
+
+    등2축 응력상태:
+        sx = sy = sigma_b
+        sxy = 0
+
+    항복함수는 응력에 대해 12차 동차식이므로
+    sx = sy = 1 에서 phi를 계산한 뒤
+    sigma_b / sigma_0 = (phi(1,1,0)/k12)^(-1/12)
+    """
+    phi, _, _, _ = get_phi_and_derivatives(params, 1.0, 1.0, 0.0)
+
+    if phi <= 0:
+        return np.nan
+
+    return (phi / k12) ** (-1.0 / 12.0)
+
+
+def predict_r_b(params):
+    """
+    등2축 이방성계수 R_b 예측
+
+    첨부식:
+        R_b = (df/dsigma_y) / (df/dsigma_x)
+
+    등2축 상태:
+        sx = sy = 1
+        sxy = 0
+
+    응력 크기를 exp_sigma_b로 넣어도 비율은 거의 동일하지만,
+    동차성 때문에 sx = sy = 1을 사용해도 됩니다.
+    """
+    _, dfx, dfy, _ = get_phi_and_derivatives(params, 1.0, 1.0, 0.0)
+
+    return dfy / dfx
+
+
+# ------------------------------------------------------------
+# 4. 목적함수
+# ------------------------------------------------------------
+def objective(params):
+    """
+    최소화할 residual vector.
+
+    첨부식의 목적함수:
+
+        E =
+        sum eta_i (1 - sigma_theta^th / sigma_theta^exp)^2
+        + sum gamma_j (1 - R_theta^th / R_theta^exp)^2
+        + delta (1 - sigma_b^th / sigma_b^exp)^2
+        + nu (1 - R_b^th / R_b^exp)^2
+
+    least_squares는 residual의 제곱합을 최소화하므로,
+    아래에서는 각 항의 residual을 반환합니다.
+    """
+
+    # 가중치
+    eta = 1.0      # 방향별 항복응력
+    gamma = 1.0    # 방향별 r-value
+    delta = 1.0    # 등2축 항복응력
+    nu = 1.0       # 등2축 R_b
+
+    pred_sigma = np.array([predict_sigma_theta(params, deg) for deg in angles_deg])
+    pred_r = np.array([predict_r_theta(params, deg) for deg in angles_deg])
+    pred_sb = predict_sigma_b(params)
+    pred_rb = predict_r_b(params)
+
+    # 계산 중 phi <= 0 등으로 nan이 발생하면 큰 penalty 부여
+    if (
+        np.any(np.isnan(pred_sigma))
+        or np.any(np.isnan(pred_r))
+        or np.isnan(pred_sb)
+        or np.isnan(pred_rb)
+    ):
+        return np.ones(2 * len(angles_deg) + 2) * 1.0e6
+
+    res_sigma = np.sqrt(eta) * (1.0 - pred_sigma / exp_sigma)
+    res_r = np.sqrt(gamma) * (1.0 - pred_r / exp_r)
+    res_sigma_b = np.sqrt(delta) * (1.0 - pred_sb / exp_sigma_b)
+    res_r_b = np.sqrt(nu) * (1.0 - pred_rb / exp_r_b)
+
+    return np.concatenate([
+        res_sigma,
+        res_r,
+        np.array([res_sigma_b]),
+        np.array([res_r_b])
+    ])
+
+
+# ------------------------------------------------------------
+# 5. 최적화 실행
+# ------------------------------------------------------------
+initial_guess = [
+    1.039, 1.018, 0.729, 0.720,
+    0.722, 2.006, 2.825, 0.251, 1.574, 1.633,
+    1.546, 2.004
+]
+
+result = least_squares(
+    objective,
+    initial_guess,
+    method='trf',
+    max_nfev=10000,
+    xtol=1.0e-12,
+    ftol=1.0e-12,
+    gtol=1.0e-12
+)
+
+opt = result.x
+
+
+# ------------------------------------------------------------
+# 6. 최적화 결과 출력
+# ------------------------------------------------------------
+param_names = [
+    'a1', 'a2', 'a3', 'a4',
+    'b1', 'b2', 'b3', 'b4', 'b5', 'b10',
+    'alpha', 'beta'
+]
+
+print("=== Optimized Parameters ===")
+for name, val in zip(param_names, opt):
+    print(f"{name:6s}: {val: .6f}")
+
+print("\n=== Fitting Results ===")
+print("Angle   sigma_exp   sigma_th     r_exp      r_th")
+for deg, se, re in zip(angles_deg, exp_sigma, exp_r):
+    st = predict_sigma_theta(opt, deg)
+    rt = predict_r_theta(opt, deg)
+    print(f"{deg:5.1f}   {se:9.4f}   {st:9.4f}   {re:8.4f}   {rt:8.4f}")
+
+print("\nEqui-biaxial")
+print(f"sigma_b_exp = {exp_sigma_b:.4f}")
+print(f"sigma_b_th  = {predict_sigma_b(opt):.4f}")
+print(f"R_b_exp     = {exp_r_b:.4f}")
+print(f"R_b_th      = {predict_r_b(opt):.4f}")
+
+print("\nOptimization cost =", result.cost)
+print("Success =", result.success)
+print("Message =", result.message)
+
+
+# ------------------------------------------------------------
+# 7. 시각화
+# ------------------------------------------------------------
+fig, ax = plt.subplots(1, 3, figsize=(20, 6))
+
+fine_ang = np.linspace(0.0, 90.0, 181)
+
+ps = np.array([predict_sigma_theta(opt, a) for a in fine_ang])
+pr = np.array([predict_r_theta(opt, a) for a in fine_ang])
+
+# ------------------------------------------------------------
+# (1) Directional yield stress
+# ------------------------------------------------------------
+ax[0].plot(fine_ang, ps, 'b-', linewidth=2, label='Optimized')
+ax[0].plot(angles_deg, exp_sigma, 'ko', markersize=8, label='Exp. data')
+ax[0].set_xticks([0, 15, 30, 45, 60, 75, 90])
+ax[0].set_xlabel('Angle from RD (deg.)')
+ax[0].set_ylabel(r'$\sigma_\theta / \sigma_0$')
+ax[0].set_title('Directional Yield Stress')
+ax[0].grid(True, ls=':')
+ax[0].legend()
+ax[0].set_ylim(0.95, 1.35)
+
+# ------------------------------------------------------------
+# (2) Directional r-value
+# ------------------------------------------------------------
+ax[1].plot(fine_ang, pr, 'r-', linewidth=2, label='Optimized')
+ax[1].plot(angles_deg, exp_r, 'ko', markersize=8, label='Exp. data')
+ax[1].set_xticks([0, 15, 30, 45, 60, 75, 90])
+ax[1].set_xlabel('Angle from RD (deg.)')
+ax[1].set_ylabel(r'$R_\theta$')
+ax[1].set_title(r'Lankford Coefficient $R_\theta$')
+ax[1].grid(True, ls=':')
+ax[1].legend()
+ax[1].set_ylim(0.0, 6.0)
+
+# ------------------------------------------------------------
+# (3) Yield surface
+# ------------------------------------------------------------
+s_range = np.linspace(-1.8, 1.8, 300)
+X, Y = np.meshgrid(s_range, s_range)
+Z = np.zeros_like(X)
+
+for i in range(X.shape[0]):
+    for j in range(X.shape[1]):
+        val, _, _, _ = get_phi_and_derivatives(opt, X[i, j], Y[i, j], 0.0)
+        Z[i, j] = val - k12
+
+ax[2].contour(X, Y, Z, levels=[0], colors='blue', linewidths=2.5)
+
+# von Mises 기준곡면, 비교용
+Z_vm = X**2 - X * Y + Y**2 - 1.0
+ax[2].contour(X, Y, Z_vm, levels=[0], colors='gray', linestyles='--')
+
+# 실험 등2축점
+ax[2].plot(
+    exp_sigma_b,
+    exp_sigma_b,
+    'rs',
+    markersize=9,
+    label=r'Exp. $\sigma_b$'
+)
+
+# 예측 등2축점
+pred_sb = predict_sigma_b(opt)
+ax[2].plot(
+    pred_sb,
+    pred_sb,
+    'bo',
+    markersize=7,
+    label=r'Pred. $\sigma_b$'
+)
+
+ax[2].axhline(0, color='k', lw=1.0)
+ax[2].axvline(0, color='k', lw=1.0)
+ax[2].set_aspect('equal')
+ax[2].set_xlabel(r'$\sigma_x / \sigma_0$')
+ax[2].set_ylabel(r'$\sigma_y / \sigma_0$')
+ax[2].set_title('Yield Surface')
+ax[2].grid(True, ls=':')
+ax[2].legend()
+
+plt.tight_layout()
+plt.show()
