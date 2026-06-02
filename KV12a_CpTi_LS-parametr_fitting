@@ -692,3 +692,8 @@ ax[2].legend()
 
 plt.tight_layout()
 plt.show()
+from IPython.display import display
+
+display(fig)
+plt.savefig("yield_surface_result.png", dpi=300, bbox_inches="tight")
+plt.show()
