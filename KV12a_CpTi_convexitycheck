@@ -1,0 +1,1077 @@
+import numpy as np
+from scipy.optimize import least_squares
+import matplotlib.pyplot as plt
+
+# ============================================================
+# Kim-Van asymmetric J2-J3 anisotropic yield function
+#
+# phi = (J2^0)^6 + alpha*(J3^0)^4
+#       + beta*|J2^0|^(9/2)*J3^0
+#
+# yield condition:
+# phi - k^12 = 0
+# ============================================================
+
+plt.rcParams.update({
+    'font.size': 14,
+    'axes.titlesize': 16,
+    'axes.labelsize': 16,
+    'xtick.labelsize': 16,
+    'ytick.labelsize': 16,
+    'legend.fontsize': 14,
+    'figure.titlesize': 18
+})
+
+# ------------------------------------------------------------
+# 1. Experimental tensile data
+# ------------------------------------------------------------
+angles_deg = np.array([0, 22.5, 45, 67.5, 90])
+
+# sigma_theta / sigma_0
+exp_sigma = np.array([1.0, 1.078, 1.157, 1.258, 1.25])
+
+# r_theta
+exp_r = np.array([1.7, 1.9, 3.7, 4.2, 5.0])
+
+# equi-biaxial yield stress ratio
+exp_sigma_b = 1.449
+
+# equi-biaxial r-value
+exp_r_b = 0.44
+
+# ------------------------------------------------------------
+# 2-1. Optional compression data
+# ------------------------------------------------------------
+# 압축 데이터가 없으면 use_compression_data = False
+# 압축 데이터가 있으면 use_compression_data = True로 바꾸고
+# exp_sigma_c에 값을 입력합니다.
+
+
+use_compression_data = True
+
+# 0도 압축 항복응력 = 0.91*sigma_0
+# 90도 압축 항복응력 = 1.26*sigma_90
+comp_angles_deg = np.array([0, 90])
+exp_sigma_c = np.array([0.91, 1.24])
+
+# ------------------------------------------------------------
+# 2-2. Additional yield locus data from biaxial stress ratios
+# ------------------------------------------------------------
+# 항복곡면 데이터가 없으면 use_locus_data = False
+# 항복곡면 데이터가 없으면 use_locus_data = True로 바꾸고
+# exp_locus에 값을 입력합니다.
+
+
+use_locus_data = True
+
+# stress ratio test data:
+# (2:1), (1:2), (1:-1), (-1:1)
+# values are normalized stresses: (sigma_x/sigma_0, sigma_y/sigma_0)
+exp_locus = np.array([
+    [ 1.37,  0.685],   # stress ratio  2 : 1
+    [ 0.81,  1.62 ],   # stress ratio  1 : 2
+    [ 0.60, -0.60 ],   # stress ratio  1 : -1
+    [-0.56,  0.55 ]    # stress ratio -1 : 1
+])
+
+# ------------------------------------------------------------
+# 3. Constants
+# ------------------------------------------------------------
+k12 = (1.0 / 3.0) ** 6
+
+
+# ------------------------------------------------------------
+# 4. Parameter transformation
+# ------------------------------------------------------------
+def unpack_raw_params(raw):
+    """
+    raw parameter를 실제 항복함수 parameter로 변환합니다.
+
+    목적:
+    1) alpha > 0 강제
+    2) beta가 너무 커지지 않도록 제한
+
+    raw =
+    [a1,a2,a3,a4,b1,b2,b3,b4,b5,b10, alpha_raw, beta_raw]
+    """
+
+    a1, a2, a3, a4 = raw[0:4]
+    b1, b2, b3, b4, b5, b10 = raw[4:10]
+
+    # alpha > 0
+    alpha = np.exp(raw[10])
+
+    # beta 제한
+    # eta는 -1~1 사이
+    eta = np.tanh(raw[11])
+
+    # 충분조건 기반 beta limit
+    beta_lim = 4.0 * alpha**0.25 / (3.0**0.75)
+
+    # 안전계수: 0.6-0.95
+    beta = 0.95 * eta * beta_lim
+
+
+    return np.array([
+        a1, a2, a3, a4,
+        b1, b2, b3, b4, b5, b10,
+        alpha, beta
+    ])
+
+
+def make_initial_raw_params(initial_params):
+    """
+    기존 초기값 [a1,...,alpha,beta]를 raw parameter로 변환합니다.
+    """
+
+    raw = np.zeros_like(np.array(initial_params, dtype=float))
+
+    raw[0:10] = initial_params[0:10]
+
+    alpha0 = initial_params[10]
+    beta0 = initial_params[11]
+
+    # alpha_raw = log(alpha)
+    raw[10] = np.log(max(alpha0, 1.0e-8))
+
+    beta_lim0 = 4.0 * alpha0**0.25 / (3.0**0.75)
+
+    eta0 = beta0 / (0.95 * beta_lim0)
+
+    # tanh 역함수에 들어갈 수 있도록 제한
+    eta0 = np.clip(eta0, -0.95, 0.95)
+
+    raw[11] = np.arctanh(eta0)
+
+    return raw
+
+
+# ------------------------------------------------------------
+# 5. J2, J3 계산
+# ------------------------------------------------------------
+def get_j2_j3(params, sx, sy, sxy):
+    a1, a2, a3, a4 = params[0:4]
+    b1, b2, b3, b4, b5, b10 = params[4:10]
+
+    j20 = (
+        (1.0 / 6.0)
+        * ((a1 + a3) * sx**2
+           + (a1 + a2) * sy**2
+           - 2.0 * a1 * sx * sy)
+        + a4 * sxy**2
+    )
+
+    j30 = (
+        (1.0 / 27.0) * ((b1 + b2) * sx**3
+                        + (b3 + b4) * sy**3)
+        - (1.0 / 9.0) * (b1 * sx + b4 * sy) * sx * sy
+        + (1.0 / 3.0)
+        * (b5 * sy + (2.0 * b10 - b5) * sx)
+        * sxy**2
+    )
+
+    return j20, j30
+
+
+# ------------------------------------------------------------
+# 6. 비대칭 항복함수와 미분값
+# ------------------------------------------------------------
+def get_phi_and_derivatives_from_params(params, sx, sy, sxy):
+    """
+    params는 실제 parameter입니다.
+    """
+
+    a1, a2, a3, a4 = params[0:4]
+    b1, b2, b3, b4, b5, b10 = params[4:10]
+    alpha, beta = params[10], params[11]
+
+    j20, j30 = get_j2_j3(params, sx, sy, sxy)
+
+    p_asym = 4.5
+    abs_j2 = np.abs(j20)
+
+    phi = (
+        j20**6
+        + alpha * j30**4
+        + beta * abs_j2**p_asym * j30
+    )
+
+    # dJ2/dsigma
+    dj2_dsx = ((a1 + a3) / 3.0) * sx - (a1 / 3.0) * sy
+    dj2_dsy = ((a1 + a2) / 3.0) * sy - (a1 / 3.0) * sx
+    dj2_dsxy = 2.0 * a4 * sxy
+
+    # dJ3/dsigma
+    dj3_dsx = (
+        (b1 / 9.0) * (sx - sy) ** 2
+        + (b2 / 9.0) * sx**2
+        - ((b1 + b4) / 9.0) * sy**2
+        + ((2.0 * b10 - b5) / 3.0) * sxy**2
+    )
+
+    dj3_dsy = (
+        (b4 / 9.0) * (sy - sx) ** 2
+        + (b3 / 9.0) * sy**2
+        - ((b1 + b4) / 9.0) * sx**2
+        + (b5 / 3.0) * sxy**2
+    )
+
+    dj3_dsxy = (
+        (2.0 / 3.0)
+        * sxy
+        * (b5 * sy + (2.0 * b10 - b5) * sx)
+    )
+
+    if abs_j2 < 1.0e-14:
+        sign_j2 = 0.0
+    else:
+        sign_j2 = np.sign(j20)
+
+    # dphi/dJ2
+    A = (
+        6.0 * j20**5
+        + beta * p_asym * abs_j2**(p_asym - 1.0) * sign_j2 * j30
+    )
+
+    # dphi/dJ3
+    B = (
+        4.0 * alpha * j30**3
+        + beta * abs_j2**p_asym
+    )
+
+    df_dsx = A * dj2_dsx + B * dj3_dsx
+    df_dsy = A * dj2_dsy + B * dj3_dsy
+    df_dsxy = A * dj2_dsxy + B * dj3_dsxy
+
+    return phi, df_dsx, df_dsy, df_dsxy
+
+
+def get_phi_and_derivatives(raw, sx, sy, sxy):
+    params = unpack_raw_params(raw)
+    return get_phi_and_derivatives_from_params(params, sx, sy, sxy)
+
+
+# ------------------------------------------------------------
+# 7. Stress state helper
+# ------------------------------------------------------------
+def uniaxial_stress_state(deg, sign=+1.0):
+    """
+    sign = +1 : tension
+    sign = -1 : compression
+
+    theta 방향 단축응력 상태:
+    sigma_x  = sign*cos^2(theta)
+    sigma_y  = sign*sin^2(theta)
+    tau_xy   = sign*sin(theta)*cos(theta)
+    """
+
+    th = np.radians(deg)
+    c = np.cos(th)
+    s = np.sin(th)
+
+    sx = sign * c**2
+    sy = sign * s**2
+    sxy = sign * s * c
+
+    return sx, sy, sxy
+
+
+def planar_stress_state(th):
+    """
+    sigma_x = cos(th)
+    sigma_y = sin(th)
+    sigma_xy = 0
+    """
+    return np.cos(th), np.sin(th), 0.0
+
+
+# ------------------------------------------------------------
+# 8. Prediction functions
+# ------------------------------------------------------------
+def predict_sigma_uniaxial(raw, deg, sign=+1.0):
+    """
+    단축 인장 또는 압축 항복응력 크기 예측
+
+    sign = +1 : tensile yield stress
+    sign = -1 : compressive yield stress magnitude
+    """
+
+    sx, sy, sxy = uniaxial_stress_state(deg, sign=sign)
+
+    phi, _, _, _ = get_phi_and_derivatives(raw, sx, sy, sxy)
+
+    if phi <= 0 or np.isnan(phi):
+        return np.nan
+
+    return (phi / k12) ** (-1.0 / 12.0)
+
+
+def predict_sigma_theta(raw, deg):
+    return predict_sigma_uniaxial(raw, deg, sign=+1.0)
+
+
+def predict_sigma_compression(raw, deg):
+    return predict_sigma_uniaxial(raw, deg, sign=-1.0)
+
+
+def predict_r_theta(raw, deg):
+    sx, sy, sxy = uniaxial_stress_state(deg, sign=+1.0)
+
+    _, dfx, dfy, dfxy = get_phi_and_derivatives(raw, sx, sy, sxy)
+
+    th = np.radians(deg)
+    c = np.cos(th)
+    s = np.sin(th)
+
+    numerator = dfx * s**2 + dfy * c**2 - dfxy * s * c
+    denominator = dfx + dfy
+
+    if np.abs(denominator) < 1.0e-14:
+        return np.nan
+
+    return -numerator / denominator
+
+
+def predict_sigma_b(raw):
+    """
+    등2축 인장 항복응력 sigma_b / sigma_0
+    """
+
+    phi, _, _, _ = get_phi_and_derivatives(raw, 1.0, 1.0, 0.0)
+
+    if phi <= 0 or np.isnan(phi):
+        return np.nan
+
+    return (phi / k12) ** (-1.0 / 12.0)
+
+
+def predict_r_b(raw):
+    """
+    R_b = df/dsigma_y / df/dsigma_x
+    """
+
+    _, dfx, dfy, _ = get_phi_and_derivatives(raw, 1.0, 1.0, 0.0)
+
+    if np.abs(dfx) < 1.0e-14:
+        return np.nan
+
+    return dfy / dfx
+
+def radial_yield_stress(raw, ang):
+    """
+    항복곡면의 radial distance rho(theta) = sigma_theta / sigma_0
+    """
+    sx, sy, sxy = planar_stress_state(ang)
+    phi, _, _, _ = get_phi_and_derivatives(raw, sx, sy, sxy)
+    if phi <= 0 or np.isnan(phi):
+        return np.nan
+    return (phi / k12)**(-1.0/12.0)
+
+
+# ------------------------------------------------------------
+# 9. Closure and positivity penalties
+# ------------------------------------------------------------
+def closure_penalty(raw, n_ang=181, eps=1.0e-8, weight=5.0):
+    """
+    항복곡면이 열리지 않도록 phi(direction)>0을 요구합니다.
+
+    sx = cos(theta), sy = sin(theta), sxy = 0
+    방향들에 대해 phi가 eps보다 작으면 penalty를 줍니다.
+    """
+
+    res = []
+    angs = np.linspace(0.0, 2.0*np.pi, n_ang, endpoint=False)
+
+    for th in angs:
+        sx = np.cos(th)
+        sy = np.sin(th)
+        sxy = 0.0
+
+        phi, _, _, _ = get_phi_and_derivatives(raw, sx, sy, sxy)
+
+        if np.isnan(phi) or np.isinf(phi):
+            res.append(1.0e3)
+        elif phi < eps:
+            res.append(np.sqrt(weight) * (eps - phi) / eps)
+        else:
+            res.append(0.0)
+
+    return np.array(res)
+
+
+def j2_positive_penalty(raw, n_ang=181, eps=1.0e-8, weight=5.0):
+    """
+    J2^0가 모든 방향에서 양수가 되도록 하는 penalty입니다.
+    """
+
+    params = unpack_raw_params(raw)
+
+    res = []
+    angs = np.linspace(0.0, 2.0*np.pi, n_ang, endpoint=False)
+
+    # normal stress directions
+    for th in angs:
+        sx = np.cos(th)
+        sy = np.sin(th)
+        sxy = 0.0
+
+        j20, _ = get_j2_j3(params, sx, sy, sxy)
+
+        if np.isnan(j20) or np.isinf(j20):
+            res.append(1.0e3)
+        elif j20 < eps:
+            res.append(np.sqrt(weight) * (eps - j20) / eps)
+        else:
+            res.append(0.0)
+
+    # pure shear direction도 추가
+    j20_shear, _ = get_j2_j3(params, 0.0, 0.0, 1.0)
+
+    if np.isnan(j20_shear) or np.isinf(j20_shear):
+        res.append(1.0e3)
+    elif j20_shear < eps:
+        res.append(np.sqrt(weight) * (eps - j20_shear) / eps)
+    else:
+        res.append(0.0)
+
+    return np.array(res)
+
+
+def polar_convexity_penalty(raw, n_ang=361, weight=10.0, eps=1.0e-8):
+    """
+    극좌표 항복곡면 rho(theta)에 대한 볼록성 penalty.
+
+    볼록 조건:
+        rho^2 + 2*rho_prime^2 - rho*rho_double_prime >= 0
+
+    이 값이 음수가 되는 구간은 오목부가 생긴 것으로 보고 penalty를 부여합니다.
+    """
+
+    angs = np.linspace(0.0, 2.0*np.pi, n_ang, endpoint=False)
+    dth = angs[1] - angs[0]
+
+    rho = np.array(
+        [radial_yield_stress(raw, th) for th in angs]
+    )
+
+    if np.any(np.isnan(rho)) or np.any(np.isinf(rho)):
+        return np.ones(n_ang) * 1.0e3
+
+    rho_p = np.roll(rho, -1)
+    rho_m = np.roll(rho, 1)
+
+    rho_prime = (rho_p - rho_m) / (2.0*dth)
+    rho_double = (rho_p - 2.0*rho + rho_m) / (dth**2)
+
+    curvature_measure = rho**2 + 2.0*rho_prime**2 - rho*rho_double
+
+    # 음수가 되면 오목부 발생
+    pen = np.maximum(0.0, -curvature_measure + eps)
+
+    # scale normalization
+    scale = np.mean(rho**2) + eps
+
+    return np.sqrt(weight) * pen / scale
+
+
+# ------------------------------------------------------------
+# 10. Objective function
+# ------------------------------------------------------------
+
+def yield_locus_residual(raw, locus_points, weight=10.0):
+    """
+    Additional experimental yield locus points.
+
+    Each point is:
+        [sigma_x/sigma_0, sigma_y/sigma_0]
+
+    Yield condition:
+        phi(sigma_x, sigma_y, 0) - k12 = 0
+
+    Residual:
+       (phi / k12)**(1.0/12.0) - 1.0
+    """
+
+    res = []
+
+    for sx, sy in locus_points:
+        phi, _, _, _ = get_phi_and_derivatives(raw, sx, sy, 0.0)
+
+        if phi <= 0 or np.isnan(phi) or np.isinf(phi):
+            res.append(1.0e3)
+        else:
+            res.append(np.sqrt(weight) * ((phi / k12)**(1.0/12.0) - 1.0))
+
+    return np.array(res)
+
+def objective(raw):
+    """
+    실험값 fitting residual + 물리적 제약 penalty
+    """
+
+    # fitting weights
+    w_sigma = 20.0
+    w_r = 1.0
+    w_sigma_b = 10.0
+    w_r_b = 1.0
+    w_comp = 15.0
+    w_locus = 5.0
+
+
+    pred_sigma = np.array([
+        predict_sigma_theta(raw, deg) for deg in angles_deg
+    ])
+
+    pred_r = np.array([
+        predict_r_theta(raw, deg) for deg in angles_deg
+    ])
+
+    pred_sb = predict_sigma_b(raw)
+    pred_rb = predict_r_b(raw)
+
+    if (
+        np.any(np.isnan(pred_sigma))
+        or np.any(np.isnan(pred_r))
+        or np.isnan(pred_sb)
+        or np.isnan(pred_rb)
+        or np.any(np.isinf(pred_sigma))
+        or np.any(np.isinf(pred_r))
+        or np.isinf(pred_sb)
+        or np.isinf(pred_rb)
+    ):
+        return np.ones(2*len(angles_deg) + 2 + 50) * 1.0e6
+
+    res_sigma = np.sqrt(w_sigma) * (1.0 - pred_sigma / exp_sigma)
+    res_r = np.sqrt(w_r) * (1.0 - pred_r / exp_r)
+    res_sigma_b = np.array([
+        np.sqrt(w_sigma_b) * (1.0 - pred_sb / exp_sigma_b)
+    ])
+    res_r_b = np.array([
+        np.sqrt(w_r_b) * (1.0 - pred_rb / exp_r_b)
+    ])
+
+    residuals = [
+        res_sigma,
+        res_r,
+        res_sigma_b,
+        res_r_b
+    ]
+
+    # 압축 데이터가 있으면 추가
+    if use_compression_data:
+        pred_comp = np.array([
+            predict_sigma_compression(raw, deg)
+            for deg in comp_angles_deg
+        ])
+
+        if np.any(np.isnan(pred_comp)) or np.any(np.isinf(pred_comp)):
+            return np.ones(2*len(angles_deg) + 2 + len(comp_angles_deg) + 50) * 1.0e6
+
+        res_comp = np.sqrt(w_comp) * (1.0 - pred_comp / exp_sigma_c)
+
+        residuals.append(res_comp)
+
+    # additional biaxial yield locus data
+    if use_locus_data:
+        residuals.append(
+        yield_locus_residual(raw, exp_locus, weight=w_locus)
+        )
+
+    # 닫힌 항복곡면 penalty
+    residuals.append(closure_penalty(raw, n_ang=181, eps=1.0e-8, weight=2.0))
+
+    # J2^0 positive penalty
+    residuals.append(j2_positive_penalty(raw, n_ang=181, eps=1.0e-8, weight=2.0))
+
+    # smooth convex yield locus
+    residuals.append(polar_convexity_penalty(raw, n_ang=361, weight=70.0))
+
+
+    return np.concatenate(residuals)
+
+
+# ------------------------------------------------------------
+# 11. Optimization
+# ------------------------------------------------------------
+initial_params = [
+    1.039, 1.018, 0.729, 0.720,
+    0.722, 2.006, 2.825, 0.251, 1.574, 1.633,
+    1.546, 2.004
+]
+
+raw0 = make_initial_raw_params(initial_params)
+
+result = least_squares(
+    objective,
+    raw0,
+    method='trf',
+    max_nfev=30000,
+    xtol=1.0e-12,
+    ftol=1.0e-12,
+    gtol=1.0e-12
+)
+
+raw_opt = result.x
+opt = unpack_raw_params(raw_opt)
+
+
+# ------------------------------------------------------------
+# 12. Print results
+# ------------------------------------------------------------
+param_names = [
+    'a1', 'a2', 'a3', 'a4',
+    'b1', 'b2', 'b3', 'b4', 'b5', 'b10',
+    'alpha', 'beta'
+]
+
+print("=== Optimized Parameters: constrained asymmetric model ===")
+for name, val in zip(param_names, opt):
+    print(f"{name:6s}: {val: .8f}")
+
+print("\n=== Fitting Results: tension ===")
+print("Angle   sigma_exp   sigma_th     r_exp      r_th")
+for deg, se, re in zip(angles_deg, exp_sigma, exp_r):
+    st = predict_sigma_theta(raw_opt, deg)
+    rt = predict_r_theta(raw_opt, deg)
+    print(f"{deg:5.1f}   {se:9.4f}   {st:9.4f}   {re:8.4f}   {rt:8.4f}")
+
+print("\n=== Equi-biaxial ===")
+print(f"sigma_b_exp = {exp_sigma_b:.4f}")
+print(f"sigma_b_th  = {predict_sigma_b(raw_opt):.4f}")
+print(f"R_b_exp     = {exp_r_b:.4f}")
+print(f"R_b_th      = {predict_r_b(raw_opt):.4f}")
+
+if use_compression_data:
+    print("\n=== Fitting Results: compression ===")
+    print("Angle   sigma_c_exp   sigma_c_th")
+    for deg, sc_exp in zip(comp_angles_deg, exp_sigma_c):
+        sc_th = predict_sigma_compression(raw_opt, deg)
+        print(f"{deg:5.1f}     {sc_exp:9.4f}     {sc_th:9.4f}")
+
+print("\nOptimization cost =", result.cost)
+print("Success =", result.success)
+print("Message =", result.message)
+
+
+# ------------------------------------------------------------
+# 13. Plot
+# ------------------------------------------------------------
+fig, ax = plt.subplots(1, 3, figsize=(20, 6))
+
+fine_ang = np.linspace(0.0, 90.0, 181)
+
+ps = np.array([
+    predict_sigma_theta(raw_opt, a) for a in fine_ang
+])
+
+pr = np.array([
+    predict_r_theta(raw_opt, a) for a in fine_ang
+])
+
+# ------------------------------------------------------------
+# (1) Directional tensile yield stress
+# ------------------------------------------------------------
+ax[0].plot(fine_ang, ps, 'b-', linewidth=2, label='Constrained asymmetric')
+ax[0].plot(angles_deg, exp_sigma, 'ko', markersize=8, label='Exp. tension')
+
+if use_compression_data:
+    pc = np.array([
+        predict_sigma_compression(raw_opt, a) for a in fine_ang
+    ])
+    ax[0].plot(fine_ang, pc, 'g--', linewidth=2, label='Pred. compression')
+    ax[0].plot(comp_angles_deg, exp_sigma_c, 'gs', markersize=8, label='Exp. compression')
+
+ax[0].set_xticks([0, 15, 30, 45, 60, 75, 90])
+ax[0].set_xlabel('Angle from RD (deg.)')
+ax[0].set_ylabel(r'$\%sigma_\theta / \%sigma_0$')
+ax[0].set_title('Directional Yield Stress')
+ax[0].grid(True, ls=':')
+ax[0].legend()
+ax[0].set_ylim(0.8, 1.5)
+
+# ------------------------------------------------------------
+# (2) R-value
+# ------------------------------------------------------------
+ax[1].plot(fine_ang, pr, 'r-', linewidth=2, label='Constrained asymmetric')
+ax[1].plot(angles_deg, exp_r, 'ko', markersize=8, label='Exp. data')
+ax[1].set_xticks([0, 15, 30, 45, 60, 75, 90])
+ax[1].set_xlabel('Angle from RD (deg.)')
+ax[1].set_ylabel(r'$R_\theta$')
+ax[1].set_title(r'Lankford Coefficient $R_\theta$')
+ax[1].grid(True, ls=':')
+ax[1].legend()
+ax[1].set_ylim(0.0, 6.0)
+
+# ------------------------------------------------------------
+# (3) Yield surface
+# ------------------------------------------------------------
+s_range = np.linspace(-2.0, 2.0, 401)
+X, Y = np.meshgrid(s_range, s_range)
+Z = np.zeros_like(X)
+
+for i in range(X.shape[0]):
+    for j in range(X.shape[1]):
+        val, _, _, _ = get_phi_and_derivatives(raw_opt, X[i, j], Y[i, j], 0.0)
+        Z[i, j] = val - k12
+
+ax[2].contour(X, Y, Z, levels=[0], colors='blue', linewidths=2.5)
+
+# von Mises comparison
+Z_vm = X**2 - X*Y + Y**2 - 1.0
+ax[2].contour(X, Y, Z_vm, levels=[0], colors='gray', linestyles='--')
+
+# equi-biaxial point
+ax[2].plot(exp_sigma_b, exp_sigma_b, 'rs', markersize=9, label=r'Exp. $\%sigma_b$')
+pred_sb = predict_sigma_b(raw_opt)
+ax[2].plot(pred_sb, pred_sb, 'bo', markersize=7, label=r'Pred. $\%sigma_b$')
+
+# additional yield locus experimental points
+if use_locus_data:
+    ax[2].plot(
+        exp_locus[:, 0],
+        exp_locus[:, 1],
+        'md',
+        markersize=8,
+        label='Exp. stress-ratio points'
+    )
+
+# uniaxial tension points
+ax[2].plot(exp_sigma[0], 0.0, 'ko', markersize=6)
+ax[2].plot(0.0, exp_sigma[-1], 'ko', markersize=6)
+
+# compression points if available
+if use_compression_data:
+    for deg, sc in zip(comp_angles_deg, exp_sigma_c):
+        sx, sy, sxy = uniaxial_stress_state(deg, sign=-1.0)
+        ax[2].plot(sc*sx, sc*sy, 'gs', markersize=8)
+
+ax[2].axhline(0, color='k', lw=1.0)
+ax[2].axvline(0, color='k', lw=1.0)
+ax[2].set_aspect('equal')
+ax[2].set_xlabel(r'$\%sigma_x / \%sigma_0$')
+ax[2].set_ylabel(r'$\%sigma_y / \%sigma_0$')
+ax[2].set_title('Constrained Asymmetric Yield Surface')
+ax[2].grid(True, ls=':')
+ax[2].legend()
+
+plt.tight_layout()
+plt.show()
+
+# ------------------------------------------------------------
+# 15. Convexity check
+# ------------------------------------------------------------
+
+# 1) Polar curvature-based convexity check
+def check_polar_convexity(raw, n_ang=721, tol=1.0e-6, print_result=True):
+    """
+   
+
+    Convex condition:
+        rho^2 + 2*rho_prime^2 - rho*rho_double_prime >= 0
+
+   
+    """
+
+    angs = np.linspace(0.0, 2.0*np.pi, n_ang, endpoint=False)
+    dth = angs[1] - angs[0]
+
+    rho = np.array([
+        radial_yield_stress(raw, th) for th in angs
+    ])
+
+    if np.any(np.isnan(rho)) or np.any(np.isinf(rho)):
+        print("Convexity check failed: rho contains NaN or Inf.")
+        return False, None
+
+    rho_p = np.roll(rho, -1)
+    rho_m = np.roll(rho, 1)
+
+    rho_prime = (rho_p - rho_m) / (2.0*dth)
+    rho_double = (rho_p - 2.0*rho + rho_m) / (dth**2)
+
+    convex_measure = rho**2 + 2.0*rho_prime**2 - rho*rho_double
+
+    min_val = np.min(convex_measure)
+    min_idx = np.argmin(convex_measure)
+    min_angle_deg = np.degrees(angs[min_idx])
+
+    is_convex = min_val >= -tol
+
+    if print_result:
+        print("\n=== Polar Convexity Check ===")
+        print(f"Minimum convexity measure = {min_val:.6e}")
+        print(f"Minimum angle             = {min_angle_deg:.2f} deg")
+        print(f"Tolerance                 = {tol:.2e}")
+
+        if is_convex:
+            print("Result: Convex in sigma_x - sigma_y plane.")
+        else:
+            print("Result: Non-convex region detected.")
+
+    return is_convex, {
+        "angles_rad": angs,
+        "rho": rho,
+        "convex_measure": convex_measure,
+        "min_value": min_val,
+        "min_angle_deg": min_angle_deg
+    }
+
+
+
+is_convex, convex_info = check_polar_convexity(
+    raw_opt,
+    n_ang=721,
+    tol=1.0e-6
+)
+#. non-convex 구간을 그림으로 표시
+
+
+
+def plot_convexity_violation(raw, convex_info, ax=None, tol=1.0e-6):
+    """
+
+    """
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 6))
+
+    angs = convex_info["angles_rad"]
+    rho = convex_info["rho"]
+    measure = convex_info["convex_measure"]
+
+    sx = rho * np.cos(angs)
+    sy = rho * np.sin(angs)
+
+    ax.plot(sx, sy, 'b-', lw=2, label='Yield locus')
+
+    bad = measure < -tol
+
+    if np.any(bad):
+        ax.plot(
+            sx[bad],
+            sy[bad],
+            'ro',
+            markersize=4,
+            label='Non-convex region'
+        )
+
+    ax.axhline(0, color='k', lw=1.0)
+    ax.axvline(0, color='k', lw=1.0)
+    ax.set_aspect('equal')
+    ax.set_xlabel(r'$\sigma_x / \sigma_0$')
+    ax.set_ylabel(r'$\sigma_y / \sigma_0$')
+    ax.set_title('Convexity violation check')
+    ax.grid(True, ls=':')
+    ax.legend()
+
+    return ax
+
+
+is_convex, convex_info = check_polar_convexity(raw_opt, n_ang=721, tol=1.0e-6)
+
+fig2, ax2 = plt.subplots(figsize=(6, 6))
+plot_convexity_violation(raw_opt, convex_info, ax=ax2, tol=1.0e-6)
+plt.show()
+
+
+
+
+
+is_convex_polar, convex_info = check_polar_convexity(
+    raw_opt,
+    n_ang=721,
+    tol=1.0e-6
+)
+
+fig_c1, ax_c1 = plt.subplots(figsize=(6, 6))
+plot_convexity_violation(
+    raw_opt,
+    convex_info,
+    ax=ax_c1,
+    tol=1.0e-6
+)
+plt.show()
+
+
+# 2) Midpoint convexity check
+
+def get_yield_constant():
+    """
+  
+    """
+
+    if 'k12' in globals():
+        return k12
+    elif 'k8' in globals():
+        return k8
+    else:
+        raise ValueError("Neither k12 nor k8 is defined.")
+
+
+def midpoint_convexity_check(raw, n_ang=181, step=4, tol=1.0e-5, print_result=True):
+    """
+   
+    """
+
+    k_const = get_yield_constant()
+
+    angs = np.linspace(0.0, 2.0*np.pi, n_ang, endpoint=False)
+
+    pts = []
+
+    for th in angs:
+        rho = radial_yield_stress(raw, th)
+
+        if np.isnan(rho) or np.isinf(rho):
+            print("Midpoint check failed: rho contains NaN or Inf.")
+            return False, None
+
+        sx = rho * np.cos(th)
+        sy = rho * np.sin(th)
+
+        pts.append([sx, sy])
+
+    pts = np.array(pts)
+
+    idx = np.arange(0, n_ang, step)
+
+    max_violation = 0.0
+    worst_pair = None
+    worst_midpoint = None
+
+    violations = []
+
+    for ii in range(len(idx)):
+        for jj in range(ii + 1, len(idx)):
+
+            i = idx[ii]
+            j = idx[jj]
+
+            p_mid = 0.5 * (pts[i] + pts[j])
+
+            phi_mid, _, _, _ = get_phi_and_derivatives(
+                raw,
+                p_mid[0],
+                p_mid[1],
+                0.0
+            )
+
+            violation = phi_mid / k_const - 1.0
+
+            if violation > tol:
+                violations.append([p_mid[0], p_mid[1], violation])
+
+                if violation > max_violation:
+                    max_violation = violation
+                    worst_pair = (i, j)
+                    worst_midpoint = p_mid.copy()
+
+    is_convex = len(violations) == 0
+
+    if print_result:
+        print("\n=== Midpoint Convexity Check ===")
+        print(f"Number of checked points on yield locus = {len(idx)}")
+        print(f"Number of checked pairs                 = {len(idx)*(len(idx)-1)//2}")
+        print(f"Tolerance                               = {tol:.2e}")
+
+        if is_convex:
+            print("Result: Convex in sigma_x - sigma_y plane.")
+        else:
+            print("Result: Non-convex region detected.")
+            print(f"Number of violations = {len(violations)}")
+            print(f"Maximum violation    = {max_violation:.6e}")
+            print(f"Worst midpoint       = ({worst_midpoint[0]:.4f}, {worst_midpoint[1]:.4f})")
+            print(f"Worst pair indices   = {worst_pair}")
+
+    return is_convex, {
+        "yield_points": pts,
+        "violations": np.array(violations),
+        "max_violation": max_violation,
+        "worst_pair": worst_pair,
+        "worst_midpoint": worst_midpoint
+    }
+
+
+
+is_convex_mid, mid_info = midpoint_convexity_check(
+    raw_opt,
+    n_ang=181,
+    step=4,
+    tol=1.0e-5
+)
+#. midpoint violation도 그림에 표시
+def plot_midpoint_violation(raw, mid_info, ax=None):
+    """
+
+    """
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 6))
+
+    pts = mid_info["yield_points"]
+    violations = mid_info["violations"]
+
+    ax.plot(
+        pts[:, 0],
+        pts[:, 1],
+        'b-',
+        lw=2,
+        label='Yield locus'
+    )
+
+    if violations.size > 0:
+        ax.plot(
+            violations[:, 0],
+            violations[:, 1],
+            'rx',
+            markersize=5,
+            label='Midpoint outside'
+        )
+
+    ax.axhline(0, color='k', lw=1.0)
+    ax.axvline(0, color='k', lw=1.0)
+    ax.set_aspect('equal')
+    ax.set_xlabel(r'$\sigma_x / \sigma_0$')
+    ax.set_ylabel(r'$\sigma_y / \sigma_0$')
+    ax.set_title('Midpoint convexity check')
+    ax.grid(True, ls=':')
+    ax.legend()
+
+    return ax
+
+
+
+is_convex_mid, mid_info = midpoint_convexity_check(
+    raw_opt,
+    n_ang=181,
+    step=4,
+    tol=1.0e-5
+)
+
+fig3, ax3 = plt.subplots(figsize=(6, 6))
+plot_midpoint_violation(raw_opt, mid_info, ax=ax3)
+plt.show()
+
+is_convex_mid, mid_info = midpoint_convexity_check(
+    raw_opt,
+    n_ang=181,
+    step=4,
+    tol=1.0e-5
+)
+
+fig_c2, ax_c2 = plt.subplots(figsize=(6, 6))
+plot_midpoint_violation(
+    raw_opt,
+    mid_info,
+    ax=ax_c2
+)
+plt.show()
+
+
+# 3) Final decision
+print("\n=== Final Convexity Decision ===")
+
+if is_convex_polar and is_convex_mid:
+    print("The yield locus is numerically convex in the sigma_x - sigma_y plane.")
+else:
+    print("The yield locus may have non-convex regions in the sigma_x - sigma_y plane.")
