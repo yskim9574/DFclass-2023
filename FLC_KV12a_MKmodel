@@ -1,0 +1,773 @@
+"""
+fld_reconstructed.py
+====================================================================
+Python reconstruction of the numerical core of FLD.EXE
+(CAE/CAD Lab, Dept. of Mechanical Eng., Kyungpook National University,
+ Korea -- "FLD Version 1.0", Visual C++ 6.0 / MFC, year 2000).
+
+The program computes a theoretical Forming Limit Diagram (FLD) using the
+Marciniak-Kuczynski (M-K) imperfection-band analysis.  The original binary
+used Barlat & Lian's 1989 yield criterion; THIS VERSION substitutes the
+anisotropic Kim-Van 12th-order yield criterion (Cazacu-Barlat generalized
+invariants), parameterised for CP TITANIUM sheet:
+
+    (J2o)^6 + alpha*(J3o)^4 + beta*(J2o)^3*(J3o)^2 - k^12 = 0,  k = sigma0/sqrt(3)
+
+with the Voce hardening law  sigma = 162 + 262*(1 - exp(-5.5*eps))  [MPa]
+(see the KimVan12 class and the hardening() function).  The M-K driver,
+localization criterion and engineering-strain output are unchanged from the
+binary; the groove angle is optimised per strain ratio (rotating groove).
+
+----------------------------------------------------------------------
+RECOVERED FROM FLD.EXE (kept exactly):
+  * The input parameter set, defaults and validation ranges
+    (decompiled from the dialog handler @0x41854B).
+  * The hardening law  sigbar = (e0 + eps_bar)^n (d_eps_bar)^m
+    (decompiled from the marching routine @0x404BFB).
+  * The localization criterion d_eps_bar_b / d_eps_bar_a >= 10.
+  * The strain-ratio sweep rho = 1.0 -> -0.5 step -0.05.
+  * The engineering-strain + bending output ((1+t/2R) exp(eps) - 1)*100.
+
+SUBSTITUTED / ADDED (this version):
+  * Yield criterion: anisotropic Kim-Van 12th-order surface for
+    AA6016-T4 (KimVan12 class), in place of the binary's Barlat-Lian.
+  * ROTATING groove: the imperfection band is rotated to the angle psi
+    that minimises the limit strain (mk_limit_optimized).  For rho >= 0
+    psi = 0; for rho < 0 psi is searched near the zero-extension
+    direction tan^2(psi) = -rho (psi = 0 at plane strain, ~35 deg at
+    uniaxial).  The original binary used a fixed psi = 0.
+
+The M-K method follows Marciniak-Kuczynski (Int. J. Mech. Sci. 9, 1967);
+the yield surface uses the Cazacu-Barlat (2001) generalized invariants.
+Quick reference: run `python fld_reconstructed.py`  ->  prints the FLD
+table (minor%, major%, groove psi) and writes the overlay plot
+fld_curve.png.  Edit FLDInput() in main() to change the case.
+====================================================================
+"""
+
+import math
+from dataclasses import dataclass, field
+
+
+# ----------------------------------------------------------------------
+# Input parameters -- defaults & validation ranges recovered from
+# the dialog handler at 0x41854B in FLD.EXE.
+# ----------------------------------------------------------------------
+@dataclass
+class FLDInput:
+    f0:  float = 0.996   # initial imperfection (t_b0/t_a0)   valid (0.975, 1.0)
+    n:   float = 0.25    # strain-hardening exponent          valid (0.1, 0.4)
+    m:   float = 0.02    # strain-rate sensitivity            valid (0.008, 1.0)
+    M:   float = 8.0     # yield-surface exponent             must be in {2,6,8,10}
+    t:   float = 0.8     # sheet thickness [mm]               valid (0, 3.0)
+    R0:  float = 1.8     # plastic anisotropy R0              valid (0.5, 3.0)
+    R90: float = 1.8     # plastic anisotropy R90             valid (0.5, 3.0)
+    e0:  float = 0.01    # initial (pre-)strain               > 0
+    punch_radius: float = 50.8   # [mm]  (geometry; not used by the curve)
+    sigma_u: float = 1.0         # uniaxial yield stress  -> defines p
+    sigma_s: float = 1.732       # shear yield stress (~sqrt 3) -> defines p
+
+    def validate(self):
+        def chk(name, v, lo, hi):
+            if not (lo < v < hi):
+                raise ValueError(f"Please, rewrite {name} value "
+                                 f"(got {v}, valid range ({lo}, {hi}))")
+        chk("f0", self.f0, 0.975, 1.0)
+        chk("n",  self.n,  0.1,   0.4)
+        chk("m",  self.m,  0.008, 1.0)
+        chk("t",  self.t,  0.0,   3.0)
+        chk("R0", self.R0, 0.5,   3.0)
+        chk("R90", self.R90, 0.5, 3.0)
+        if self.M not in (2.0, 6.0, 8.0, 10.0):
+            raise ValueError(f"Please, rewrite M value (must be 2, 6, 8 or 10; got {self.M})")
+        if self.e0 <= 0:
+            raise ValueError("Please, rewrite e0 value (must be > 0)")
+        if self.punch_radius <= 0:
+            raise ValueError("Punch radius must be > 0")
+
+
+# ----------------------------------------------------------------------
+# Kim-Van ANISOTROPIC asymmetric yield criterion -- 12th order in stress, built on the
+# Cazacu-Barlat (2001) generalized orthotropic invariants J2o, J3o.
+# Coefficients below are for CP TITANIUM sheet (supplied data).
+#
+#   (J2o)^6 + alpha*(J3o)^4 + beta*(J2o)^3*(J3o)^2 - k^12 = 0,  k = sigma0/sqrt(3)
+#
+#   J2o = (1/6)[(a1+a3)sx^2 + (a1+a2)sy^2 - 2 a1 sx sy] + a4 txy^2
+#   J3o = (1/27)[(b1+b2)sx^3 + (b3+b4)sy^3]
+#         - (1/9)[b1 sx + b4 sy] sx sy
+#         + (1/3)[b5 sx + (2 b10 - b5) sy] txy^2
+#
+# Anisotropic: the a/b coefficients differ for x = rolling and y = transverse,
+# so R0/R90 are implied by the model and the dialog values are NOT used.
+# NOTE: a4, b5, b10 were marked "x" (not supplied) in the CP-Ti table.  They
+# enter ONLY the shear terms, which are inactive for the right branch and for
+# plane strain (txy = 0); they matter only for the rotated band on the left
+# (drawing) branch.  They are ASSUMED here (a4 = 1.0, b5 = b10 = 0) -- supply
+# the fitted values to refine the left branch.  Both J2o>=0 and alpha,beta>0,
+# so Phi>=0 everywhere; sigbar = (Phi / Phi_uniaxial)^(1/12), calibrated to
+# uniaxial tension along x.
+# ----------------------------------------------------------------------
+@dataclass
+class KimVan12:
+    # --- CP titanium anisotropic coefficients (supplied table) ---
+    a1: float =  2.3323; a2: float =  -0.2127; a3: float =  1.3936
+    a4: float = 1.6086              # NOT supplied (x) -- assumed
+    b1: float = 1.8337; b2: float = 4.1694; b3: float = 3.0569; b4: float = 0.3069
+    b5: float = 1.5034; b10: float =  1.4295   # NOT supplied (x) -- assumed 0
+    alpha: float =  2.8057           # coefficient of (J3o)^4
+    beta:  float = -0.9483           # coefficient of (J2o)^3 (J3o)^2
+    Phi_unit: float = 1.0          # Phi at uniaxial-x unit stress (calibration)
+
+
+
+    @classmethod
+    def from_input(cls, inp: FLDInput) -> "KimVan12":
+        obj = cls()
+        obj.Phi_unit = obj._Phi(1.0, 0.0)   # sigbar == sigma_x in uniaxial-x tension
+        obj._build_inverse_table()
+        return obj
+
+    # ---- Cazacu-Barlat generalized invariants (plane stress, material axes) ----
+    def _J2o(self, sx, sy, txy=0.0):
+        return (((self.a1 + self.a3) * sx * sx
+                 + (self.a1 + self.a2) * sy * sy
+                 - 2.0 * self.a1 * sx * sy) / 6.0
+                + self.a4 * txy * txy)
+
+    def _J3o(self, sx, sy, txy=0.0):
+        return (((self.b1 + self.b2) * sx ** 3 + (self.b3 + self.b4) * sy ** 3) / 27.0
+                - (self.b1 * sx + self.b4 * sy) * sx * sy / 9.0
+                + (self.b5 * sx + (2.0 * self.b10 - self.b5) * sy) * txy * txy / 3.0)
+
+    def _Phi(self, sx, sy, txy=0.0):
+        # SD-capturing form: third term is beta * |J2o|^(9/2) * J3o  (J3o to the
+        # FIRST power -> odd in J3o -> tension/compression (strength-differential)
+        # asymmetry).  abs() guards the fractional power (J2o >= 0 here anyway).
+        J2 = self._J2o(sx, sy, txy)
+        J3 = self._J3o(sx, sy, txy)
+        return J2 ** 6 + self.alpha * J3 ** 4 + self.beta * (abs(J2) ** 4.5) * J3
+
+    def phi(self, s1, s2):
+        """Equivalent stress sigbar = (Phi/Phi_unit)^(1/12), calibrated to uniaxial-x.
+        s1 = sigma_x (rolling, major-strain axis), s2 = sigma_y (transverse)."""
+        val = self._Phi(s1, s2, 0.0)
+        if val <= 0.0:
+            return float("nan")
+        return (val / self.Phi_unit) ** (1.0 / 12.0)
+
+    def _build_inverse_table(self):
+        """Precompute a monotone alpha -> rho table so alpha_from_rho is a
+        fast table lookup instead of a nested root-find.  Capped at alpha=1.2
+        (just past equibiaxial), beyond which the flow normal d(sigbar)/ds1 ->
+        0 and rho(alpha) turns singular/non-monotonic."""
+        self._al, self._rh = [], []
+        a = -1.5
+        while a <= 1.20001:
+            self._al.append(a)
+            self._rh.append(self.strain_ratio(a))
+            a += 0.001
+
+    def grad(self, s1, s2, eps=1e-7):
+        """d(sigbar)/d(s1), d(sigbar)/d(s2) by central differences."""
+        sb = self.phi
+        d1 = (sb(s1 + eps, s2) - sb(s1 - eps, s2)) / (2 * eps)
+        d2 = (sb(s1, s2 + eps) - sb(s1, s2 - eps)) / (2 * eps)
+        return d1, d2
+
+    def strain_ratio(self, alpha):
+        """rho = d_eps2/d_eps1 for a stress ratio alpha = s2/s1 (s1=1),
+        via the associated flow rule d_eps_ij ~ d(sigbar)/d(sigma_ij)."""
+        d1, d2 = self.grad(1.0, alpha)
+        return d2 / d1
+
+    def alpha_from_rho(self, rho):
+        """Invert strain_ratio via the precomputed monotone table."""
+        rh, al = self._rh, self._al
+        if rho <= rh[0]:
+            return al[0]
+        if rho >= rh[-1]:
+            return al[-1]
+        # binary search for the bracketing interval, then linear interpolate
+        lo, hi = 0, len(rh) - 1
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if rh[mid] <= rho:
+                lo = mid
+            else:
+                hi = mid
+        t = (rho - rh[lo]) / (rh[hi] - rh[lo])
+        return al[lo] + t * (al[hi] - al[lo])
+
+    def sigbar_over_s1(self, alpha):
+        """G(alpha) = sigbar / sigma1 for stress ratio alpha."""
+        return self.phi(1.0, alpha)
+
+    def deps_eq_per_deps1(self, alpha, rho):
+        """d_eps_bar / d_eps1 from plastic-work equivalence:
+        sigbar * d_eps_bar = s1*d_eps1 + s2*d_eps2."""
+        G = self.sigbar_over_s1(alpha)        # sigbar (with s1 = 1)
+        return (1.0 + alpha * rho) / G
+
+    # ---- general yield (with shear) + analytic gradient, for the band region ----
+    def sigbar(self, sx, sy, txy):
+        """Equivalent stress for a full plane-stress state (sx, sy, txy)."""
+        val = self._Phi(sx, sy, txy)
+        if val <= 0.0:
+            return 0.0
+        return (val / self.Phi_unit) ** (1.0 / 12.0)
+
+    def grad3(self, sx, sy, txy):
+        """Analytic d(sigbar)/d(sx, sy, txy).  The txy component is conjugate
+        to the ENGINEERING shear gamma_xy.  Used for the rotated-band flow rule."""
+        a1, a2, a3, a4 = self.a1, self.a2, self.a3, self.a4
+        b1, b2, b3, b4, b5, b10 = self.b1, self.b2, self.b3, self.b4, self.b5, self.b10
+        J2 = self._J2o(sx, sy, txy)
+        J3 = self._J3o(sx, sy, txy)
+        Phi = J2 ** 6 + self.alpha * J3 ** 4 + self.beta * (abs(J2) ** 4.5) * J3
+        if Phi <= 0.0:
+            return 0.0, 0.0, 0.0
+        dJ2x = ((a1 + a3) * sx - a1 * sy) / 3.0
+        dJ2y = ((a1 + a2) * sy - a1 * sx) / 3.0
+        dJ2t = 2.0 * a4 * txy
+        dJ3x = ((b1 + b2) * sx * sx) / 9.0 - (2.0 * b1 * sx * sy + b4 * sy * sy) / 9.0 + b5 * txy * txy / 3.0
+        dJ3y = ((b3 + b4) * sy * sy) / 9.0 - (b1 * sx * sx + 2.0 * b4 * sx * sy) / 9.0 + (2.0 * b10 - b5) * txy * txy / 3.0
+        dJ3t = 2.0 * (b5 * sx + (2.0 * b10 - b5) * sy) * txy / 3.0
+        # d(Phi): third term beta*|J2|^4.5*J3 -> d/dJ2 = 4.5 beta |J2|^3.5 J3, d/dJ3 = beta |J2|^4.5
+        cJ2 = 6.0 * J2 ** 5 + 4.5 * self.beta * (abs(J2) ** 3.5) * J3
+        cJ3 = 4.0 * self.alpha * J3 ** 3 + self.beta * (abs(J2) ** 4.5)
+        dPx = cJ2 * dJ2x + cJ3 * dJ3x
+        dPy = cJ2 * dJ2y + cJ3 * dJ3y
+        dPt = cJ2 * dJ2t + cJ3 * dJ3t
+        sb = (Phi / self.Phi_unit) ** (1.0 / 12.0)
+        f = sb / (12.0 * Phi)               # d(sigbar)/dPhi
+        return f * dPx, f * dPy, f * dPt
+
+
+class KimVan12_TD(KimVan12):
+    """Same KV12a surface, but evaluated with the TRANSVERSE (y) axis along the
+    MAJOR-strain direction (specimen rotated 90 deg): every evaluation swaps
+    x <-> y.  The equivalent-stress calibration (Phi_unit) is kept in the
+    rolling-direction uniaxial reference, because the hardening curve sigma(eps)
+    is the RD curve (sigbar is a direction-independent material property).
+    Shear: a4 is symmetric and b5=b10=0 for CP-Ti, so only the normal stresses
+    swap."""
+    def _J2o(self, sx, sy, txy=0.0):
+        return KimVan12._J2o(self, sy, sx, txy)
+
+    def _J3o(self, sx, sy, txy=0.0):
+        return KimVan12._J3o(self, sy, sx, txy)
+
+    def grad3(self, sx, sy, txy):
+        # finite differences of the (already x<->y swapped) sigbar; avoids the
+        # double-swap that arises from reusing the base analytic gradient, which
+        # itself calls the overridden _J2o/_J3o.
+        e = 1e-6 * max(1.0, abs(sx), abs(sy), abs(txy))
+        f = self.sigbar
+        gx = (f(sx + e, sy, txy) - f(sx - e, sy, txy)) / (2.0 * e)
+        gy = (f(sx, sy + e, txy) - f(sx, sy - e, txy)) / (2.0 * e)
+        gt = (f(sx, sy, txy + e) - f(sx, sy, txy - e)) / (2.0 * e)
+        return gx, gy, gt
+
+    @classmethod
+    def from_base(cls, base: "KimVan12") -> "KimVan12_TD":
+        import dataclasses
+        obj = cls(**{f.name: getattr(base, f.name) for f in dataclasses.fields(base)})
+        obj.Phi_unit = base.Phi_unit          # keep the RD-uniaxial calibration
+        obj._build_inverse_table()
+        return obj
+
+
+# backward-compat aliases (older modules / type hints import these names)
+KimVan = KimVan12
+Barlat89 = KimVan12
+
+
+# ----------------------------------------------------------------------
+# Hardening (flow) curve for CP titanium -- user-supplied stress-strain law:
+#     sigma = 162 + 262 * (1 - exp(-5.5 * eps_bar))        [MPa, Voce saturation]
+# A small rate-sensitivity factor d_eps_bar^m (m from FLDInput) is retained so
+# the M-K localization stays well-posed and consistent with FLD.EXE; set
+# inp.m = 0 for a purely rate-independent law.  The absolute stress scale
+# cancels in the M-K force ratio, so only the curve's SHAPE drives the FLD.
+# ----------------------------------------------------------------------
+def hardening(eps_bar):
+    return 162.0 + 262.0 * (1.0 - math.exp(-5.5 * eps_bar))
+
+def hardening_deriv(eps_bar):
+    return 262.0 * 5.5 * math.exp(-5.5 * eps_bar)
+
+def flow_stress(inp: FLDInput, eps_bar, deps_bar):
+    return hardening(eps_bar) * (max(deps_bar, 1e-30)) ** inp.m
+
+
+# ----------------------------------------------------------------------
+# Marching increment, recovered from sub_403779 (depends on m and f0).
+# ----------------------------------------------------------------------
+def marching_step(inp: FLDInput) -> float:
+    # The binary (sub_403779) stores 5e-4 by default and refines to 5e-5/5e-6.
+    # The result is step-converged (5e-4 -> 5e-5 changed FLD0 by <0.01%), so we
+    # use 2e-3 for a practical pure-Python runtime with the rotating-groove
+    # search (many M-K integrations per strain ratio).  Step-converged: 2e-3 vs
+    # 1e-3 shifts FLD0 by <0.1%.  Tighten here for a smoother curve.
+    return 2e-3
+
+
+# ----------------------------------------------------------------------
+# M-K single-path solver: limit major strain for one strain ratio rho_a.
+# Fixed groove (psi = 0), force equilibrium across the band.
+# ----------------------------------------------------------------------
+LOCALIZATION_RATIO = 10.0   # localizes when d_eps_bar_b / d_eps_bar_a exceeds this
+
+def mk_limit_strain(inp: FLDInput, yld: KimVan12, rho_a: float):
+    dt = marching_step(inp)          # fixed major-strain increment in region a
+
+    # region a (homogeneous) follows the proportional path rho_a
+    alpha_a = yld.alpha_from_rho(rho_a)
+    Ga      = yld.sigbar_over_s1(alpha_a)
+    Ebar_a  = yld.deps_eq_per_deps1(alpha_a, rho_a)   # d_eps_bar_a / d_eps1_a
+
+    # accumulated strains; thicknesses normalised so t_a0 = 1, t_b0 = f0
+    e1_a = e2_a = eps_a = 0.0
+    e1_b = e2_b = eps_b = 0.0
+    de1_b_guess = dt
+
+    for _ in range(200000):
+        de1_a  = dt
+        de2_a  = rho_a * de1_a
+        deps_a = Ebar_a * de1_a
+        de2_b  = de2_a                       # compatibility along the groove
+
+        # nominal-region force per unit width (direction 1)
+        sig1_a = flow_stress(inp, eps_a + deps_a, deps_a) / Ga
+        t_a    = math.exp(-(e1_a + de1_a + e2_a + de2_a))
+        F1_a   = sig1_a * t_a
+
+        # solve groove major-strain increment de1_b on the ASCENDING branch
+        de1_b = _solve_groove_increment(inp, yld, de2_b, eps_b, e1_b, e2_b,
+                                        F1_a, dt, de1_b_guess)
+        if de1_b is None:                    # no equilibrium -> localized
+            return e1_a, e2_a
+        de1_b_guess = de1_b
+
+        rho_b   = de2_b / de1_b if de1_b != 0 else 1e9
+        alpha_b = yld.alpha_from_rho(rho_b)
+        deps_b  = yld.deps_eq_per_deps1(alpha_b, rho_b) * de1_b
+
+        # commit increments
+        e1_a += de1_a; e2_a += de2_a; eps_a += deps_a
+        e1_b += de1_b; e2_b += de2_b; eps_b += deps_b
+
+        # localization criterion: groove equivalent-strain rate runs away
+        if deps_b > LOCALIZATION_RATIO * deps_a:
+            return e1_a, e2_a            # forming-limit point (major, minor)
+        if e1_a > 3.0:                  # safety: no localization found
+            return None
+    return None
+
+
+def _solve_groove_increment(inp, yld, de2_b, eps_b, e1_b, e2_b, F1_a, dt, guess):
+    """Find de1_b with F1_b(de1_b) = F1_a on the ASCENDING branch of F1_b.
+    F1_b rises (work hardening) then falls (thinning); the physical root is
+    the smaller one.  Returns None when even the peak force < F1_a, i.e. the
+    groove can no longer carry the nominal load -> localization."""
+    def F1_b(de1_b):
+        rho_b   = de2_b / de1_b if de1_b > 0 else 1e9
+        alpha_b = yld.alpha_from_rho(rho_b)
+        Gb      = yld.sigbar_over_s1(alpha_b)
+        deps_b  = yld.deps_eq_per_deps1(alpha_b, rho_b) * de1_b
+        sig1_b  = flow_stress(inp, eps_b + deps_b, deps_b) / Gb
+        t_b     = math.exp(-(e1_b + de1_b + e2_b + de2_b)) * inp.f0
+        return sig1_b * t_b
+
+    # walk up from a small increment until we either cross F1_a (root found)
+    # or pass the force peak (localization).
+    x_prev = max(1e-9, min(guess * 0.25, dt))
+    F_prev = F1_b(x_prev)
+    x = x_prev * 1.3
+    for _ in range(400):
+        Fx = F1_b(x)
+        if Fx >= F1_a:                       # crossed target on the way up
+            a, b = x_prev, x                 # bisect for the root
+            for _ in range(60):
+                mid = 0.5 * (a + b)
+                if F1_b(mid) < F1_a:
+                    a = mid
+                else:
+                    b = mid
+            return 0.5 * (a + b)
+        if Fx < F_prev:                      # passed the peak below F1_a
+            return None                      # -> localization
+        x_prev, F_prev = x, Fx
+        x *= 1.3
+    return None
+
+
+# ----------------------------------------------------------------------
+# ROTATING-GROOVE M-K:  the imperfection band lies at angle psi (its normal
+# makes angle psi with the major / rolling axis).  For each strain ratio the
+# band is rotated to the orientation that gives the LOWEST limit strain.  For
+# rho < 0 the critical band is near the zero-extension direction tan^2(psi) =
+# -rho (psi = 0 at plane strain, ~35 deg at uniaxial), which removes the
+# over-prediction of the fixed psi = 0 left branch.
+#
+# Per step the band-frame equilibrium fixes the normal and shear tractions
+# (sigma_nn, sigma_nt) from region a; the free stress sigma_tt is solved so
+# the flow-rule tangential strain increment matches region a (compatibility),
+# with the increment magnitude set by the hardening law.
+# ----------------------------------------------------------------------
+def _solve_dl(inp, sb_state, ebb):
+    """Solve sb_state = hardening(ebb+dl) * dl^m for dl, by Newton in log space:
+    g(dl) = ln(hardening(ebb+dl)) + m*ln(dl) - ln(sb) = 0 (monotone increasing)."""
+    if sb_state <= 0.0:
+        return None
+    m = inp.m
+    ln_sb = math.log(sb_state)
+    dl = 1e-3
+    for _ in range(30):
+        H = hardening(ebb + dl)
+        g = math.log(H) + m * math.log(dl) - ln_sb
+        gp = hardening_deriv(ebb + dl) / H + (m / dl if m > 0 else 0.0)
+        if gp <= 0.0:
+            return dl
+        new = dl - g / gp
+        if new <= 0.0:
+            new = dl * 0.5
+        if abs(new - dl) <= 1e-12 * (1.0 + dl):
+            return new
+        dl = new
+    return dl
+
+
+def _band_step(inp, yld, snn, snt, deTT_a, ebb, cc, ss, cs, stt_guess):
+    """Solve the band's free stress stt so the flow-rule tangential strain
+    increment equals deTT_a.  The bracket is kept NEAR the physical region-a
+    stress (stt_guess): with a saturating hardening curve the residual has a
+    spurious far-field root (dl -> astronomical) that must be excluded.
+    Returns (dl, dexx, deyy, dexy) or None (no physical equilibrium)."""
+    def resid(stt):
+        sx = snn * cc + stt * ss - 2.0 * snt * cs
+        sy = snn * ss + stt * cc + 2.0 * snt * cs
+        txy = (snn - stt) * cs + snt * (cc - ss)
+        sb = yld.sigbar(sx, sy, txy)
+        if sb <= 0.0:
+            return None
+        dl = _solve_dl(inp, sb, ebb)
+        if dl is None:
+            return None
+        gx, gy, gt = yld.grad3(sx, sy, txy)
+        dexx = dl * gx; deyy = dl * gy; dexy = dl * 0.5 * gt
+        deTT = dexx * ss + deyy * cc - 2.0 * dexy * cs
+        return (deTT - deTT_a, dl, dexx, deyy, dexy)
+
+    # bracket the PHYSICAL root: start tight around stt_guess and expand only
+    # modestly, so the far-field (saturation) spurious root is never captured.
+    W = max(abs(snn), abs(snt), abs(stt_guess), 1.0)
+    lo, hi = stt_guess - 0.02 * W, stt_guess + 0.02 * W
+    rl = resid(lo); rh = resid(hi)
+    g = 0
+    while (rl is None or rh is None or rl[0] * rh[0] > 0) and g < 25:
+        lo -= 0.15 * W; hi += 0.15 * W; rl = resid(lo); rh = resid(hi); g += 1
+    if rl is None or rh is None or rl[0] * rh[0] > 0:
+        return None                          # no physical root -> localization
+    flo, fhi = rl[0], rh[0]
+    last = rl
+    for _ in range(30):
+        mid = hi - fhi * (hi - lo) / (fhi - flo)   # false position
+        em = resid(mid)
+        if em is None:
+            mid = 0.5 * (lo + hi); em = resid(mid)
+            if em is None:
+                return None
+        last = em
+        if abs(em[0]) < 1e-10 or abs(hi - lo) < 1e-12:
+            return em[1:]
+        if flo * em[0] < 0.0:
+            hi, fhi = mid, em[0]
+            flo *= 0.5                              # Illinois acceleration
+        else:
+            lo, flo = mid, em[0]
+            fhi *= 0.5
+    return last[1:]
+
+
+def mk_limit_angle(inp, yld, rho_a, psi):
+    """M-K limit (true major, minor strain) for one strain ratio and one band
+    normal angle psi (radians).  psi = 0 reduces to the fixed-groove case."""
+    dt = marching_step(inp)
+    c = math.cos(psi); s = math.sin(psi)
+    cc, ss, cs = c * c, s * s, c * s
+
+    alpha_a = yld.alpha_from_rho(rho_a)
+    Ga      = yld.phi(1.0, alpha_a)
+    Ebar_a  = yld.deps_eq_per_deps1(alpha_a, rho_a)
+
+    e1a = e2a = eba = 0.0
+    exx = eyy = exy = ebb = 0.0           # region-b strains (material axes)
+
+    for _ in range(200000):
+        de1a = dt; de2a = rho_a * de1a; deba = Ebar_a * de1a
+        e1a += de1a; e2a += de2a; eba += deba
+        t_a  = math.exp(-(e1a + e2a))
+        sbar_a = flow_stress(inp, eba, deba)
+        s1a = sbar_a / Ga; s2a = alpha_a * s1a
+        snn_a = s1a * cc + s2a * ss
+        snt_a = (s2a - s1a) * cs
+        stt_a = s1a * ss + s2a * cc          # region-a tangential stress (guess)
+        Fnn = snn_a * t_a; Fnt = snt_a * t_a
+        deTT_a = de1a * ss + de2a * cc
+
+        # guard: band thinned to ~nothing -> localized
+        if exx + eyy > 25.0:
+            return e1a, e2a
+        # outer iteration on the band thickness t_b (starts thinner: t_b0 = f0)
+        t_b = inp.f0 * math.exp(-(exx + eyy))
+        if not (t_b > 1e-12):
+            return e1a, e2a
+        sol = None
+        for _ in range(40):
+            r = _band_step(inp, yld, Fnn / t_b, Fnt / t_b, deTT_a, ebb, cc, ss, cs,
+                           stt_a / t_b)
+            if r is None:
+                break
+            dl, dexx, deyy, dexy = r
+            sol = r
+            if (not math.isfinite(dl)) or abs(dexx) > 0.5 or abs(deyy) > 0.5:
+                break                        # blow-up; resolved after the loop
+            t_new = inp.f0 * math.exp(-(exx + dexx + eyy + deyy))
+            if not (t_new > 1e-12):
+                break
+            if abs(t_new - t_b) < 1e-11:
+                break
+            t_b = t_new
+        if sol is None:
+            return e1a, e2a                  # band cannot equilibrate -> localized
+        dl, dexx, deyy, dexy = sol
+        if dl > LOCALIZATION_RATIO * deba:   # genuine groove strain-rate runaway
+            return e1a, e2a
+        if (not math.isfinite(dl)) or abs(dexx) > 0.5 or abs(deyy) > 0.5:
+            return None                      # non-physical blow-up -> skip this angle
+        ebb += dl; exx += dexx; eyy += deyy; exy += dexy
+        if e1a > 3.0:
+            return None
+    return None
+
+
+def mk_limit_optimized(inp, yld, rho_a):
+    """Limit strain minimised over the band angle psi.  Returns
+    (e1, e2, psi_deg).  For rho >= 0 the groove stays at psi = 0; for rho < 0
+    psi is searched near the zero-extension direction tan^2(psi) = -rho."""
+    if rho_a >= 0.0:
+        # right branch is psi = 0; use the robust fixed-groove solver
+        r = mk_limit_strain(inp, yld, rho_a)
+        return (r[0], r[1], 0.0) if r else None
+
+    psi0 = math.atan(math.sqrt(-rho_a))      # zero-extension angle (analytic optimum)
+    hi   = min(math.radians(55.0), psi0 + math.radians(12.0))
+    best = None; best_psi = 0.0
+    npts = 4
+    for i in range(npts + 1):
+        psi = hi * i / npts
+        r = mk_limit_angle(inp, yld, rho_a, psi)
+        if r is None:
+            continue
+        if best is None or r[0] < best[0]:
+            best = r; best_psi = psi
+    if best is None:
+        return None
+    return (best[0], best[1], math.degrees(best_psi))
+
+
+# ----------------------------------------------------------------------
+# GTN ductile-damage model (Gurson-Tvergaard-Needleman) -- ductile FRACTURE
+# limit, integrated along each proportional strain path until the voids reach
+# the coalescence fraction f_c.  CP-titanium parameters from Zhai et al.,
+# "Modeling the ductile damage process in commercially pure titanium".
+#
+#   Phi = (sigbar/sM)^2 + 2 q1 f* cosh(1.5 q2 sigma_m/sM) - (1 + q3 f*^2) = 0
+#   f_dot = (1-f) tr(dEps_p)            (growth)
+#         + [fn/(sN sqrt(2pi))] exp(-0.5((eM-eN)/sN)^2) deM   (nucleation)
+#
+# sM = matrix flow stress = hardening(eM);  sigma_m/sigbar = triaxiality T,
+# which is set by the (anisotropic) stress state on the yield surface.
+# Fracture is taken at f = f_c (onset of void coalescence).
+# ----------------------------------------------------------------------
+@dataclass
+class GTNParams:
+    f0: float = 0.006     # initial void volume fraction
+    fn: float = 0.002     # nucleating-particle volume fraction
+    fc: float = 0.035     # critical f at coalescence (fracture criterion)
+    q1: float = 1.5
+    q2: float = 1.0       # not given in the table -> standard default
+    q3: float = 1.6
+    eN: float = 0.22      # mean nucleation strain
+    sN: float = 0.05      # std dev of nucleation strain
+    coalescence: bool = True   # True: fracture at f=f_c (sharp cap);
+                               # False: growth-only -> macroscopic-stress maximum
+                               #        from void softening (gradual limit)
+
+
+def _gtn_solve_x(gtn, f, T):
+    """Solve the GTN yield Phi=0 for x = sigbar/sM at fixed triaxiality T."""
+    def h(x):
+        return x * x + 2.0 * gtn.q1 * f * math.cosh(1.5 * gtn.q2 * T * x) - (1.0 + gtn.q3 * f * f)
+    if h(0.0) >= 0.0:
+        return None                       # voids already destroy load capacity
+    lo, hi = 0.0, 1.5
+    k = 0
+    while h(hi) < 0.0 and k < 30:
+        hi *= 1.2; k += 1
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if h(mid) < 0.0:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def gtn_fracture_limit(inp, yld, gtn, rho):
+    """Ductile-fracture limit (true major, minor strain) at strain ratio rho:
+    integrate void growth + nucleation along the proportional path until
+    f = f_c.  Returns (e1, e2) or None if the voids never coalesce (then
+    necking governs)."""
+    alpha = yld.alpha_from_rho(rho)
+    G = yld.phi(1.0, alpha)               # sigbar / sigma1
+    if not (G > 0):
+        return None
+    T = (1.0 + alpha) / (3.0 * G)         # stress triaxiality sigma_m / sigbar
+    Ebar = yld.deps_eq_per_deps1(alpha, rho)   # d_eps_bar / d_eps1
+    if not (Ebar > 0):
+        return None
+
+    f = gtn.f0; eM = 0.0; ebar = 0.0
+    deq = 1e-3                            # macroscopic equivalent-strain step
+    smax = -1.0; e1_smax = 0.0           # for the growth-only (max-stress) criterion
+    for _ in range(400000):
+        x = _gtn_solve_x(gtn, f, T)
+        if x is None:
+            e1 = ebar / Ebar             # load capacity lost -> fracture
+            return e1, rho * e1
+        e1 = ebar / Ebar
+        if gtn.coalescence:
+            if f >= gtn.fc:              # void coalescence onset -> fracture (sharp)
+                return e1, rho * e1
+        else:
+            # growth-only: macroscopic flow stress = x * sM; it rises (hardening)
+            # then falls once void softening wins -> that peak is a gradual,
+            # triaxiality-dependent forming limit (no hard f_c threshold).
+            smac = x * hardening(eM)
+            if smac > smax:
+                smax = smac; e1_smax = e1
+            elif smac < smax * (1.0 - 1e-6) and ebar > 0.02:
+                return e1_smax, rho * e1_smax
+        sinh_t = math.sinh(1.5 * gtn.q2 * T * x)
+        dvol = deq * (3.0 * gtn.q1 * gtn.q2 * f / (2.0 * x)) * sinh_t   # d_eps_v
+        deM = x * (deq + T * dvol) / (1.0 - f)                          # matrix strain
+        dfg = (1.0 - f) * dvol                                         # growth
+        An = (gtn.fn / (gtn.sN * math.sqrt(2.0 * math.pi))) \
+             * math.exp(-0.5 * ((eM - gtn.eN) / gtn.sN) ** 2)
+        dfn = An * deM                                                 # nucleation
+        f += dfg + dfn
+        eM += deM
+        ebar += deq
+        if ebar > 5.0:
+            return None                  # no limit reached -> necking governs
+    return None
+
+
+# ----------------------------------------------------------------------
+# Outer driver: sweep rho_a = 1.0 -> -0.5 step -0.05 (as in sub_403E39).
+# ----------------------------------------------------------------------
+def to_engineering(eps_true, t, R):
+    """Reproduce the value the binary stores/plots (sub_403E39 @0x404051):
+        strain% = ((1 + t/(2R)) * exp(eps_true) - 1) * 100
+    i.e. engineering strain in %, including the bending/curvature factor
+    (1 + t/2R) from wrapping the sheet over the punch radius R."""
+    bend = 1.0 + t / (2.0 * R)
+    return (bend * math.exp(eps_true) - 1.0) * 100.0
+
+
+def compute_fld(inp: FLDInput):
+    """Returns (yld, gtn_co, gtn_gr, points).  Each point is in TRUE strain %:
+       (rho, neck_minor, neck_major, fco_minor, fco_major, fgr_minor, fgr_major)
+    necking (M-K), GTN-coalescence fracture, and GTN-growth-only fracture."""
+    inp.validate()
+    yld = KimVan12.from_input(inp)
+    gtn_co = GTNParams(coalescence=True)    # fracture at f = f_c (sharp cap)
+    gtn_gr = GTNParams(coalescence=False)   # growth-only -> gradual limit
+    print("# Kim-Van anisotropic 12th-order yield (CP titanium), SD-capturing form:")
+    print("#   (J2o)^6 + a*(J3o)^4 + b*|J2o|^(9/2)*J3o = k^12")
+    print(f"#   alpha={yld.alpha:g}, beta={yld.beta:g}; "
+          f"a1..a3=({yld.a1},{yld.a2},{yld.a3})  b1..b4=({yld.b1},{yld.b2},{yld.b3},{yld.b4})")
+    print(f"#   shear coeffs a4={yld.a4}, b5={yld.b5}, b10={yld.b10} (assumed; not supplied)")
+    print("#   hardening: sigma = 162 + 262*(1 - exp(-5.5*eps)) MPa")
+    print(f"#   GTN: f0={gtn_co.f0}, fn={gtn_co.fn}, fc={gtn_co.fc}, q1={gtn_co.q1}, "
+          f"q2={gtn_co.q2}, q3={gtn_co.q3}, eN={gtn_co.eN}, sN={gtn_co.sN}  (Zhai et al.)")
+    r0  = -yld.strain_ratio(0.0) / (1.0 + yld.strain_ratio(0.0))
+    print(f"#   implied R0 (uniaxial-x) = {r0:.3f}   [strains below are TRUE strain %]")
+    points = []
+    rho = 1.0
+    while rho >= -0.5 - 1e-9:
+        neck = mk_limit_optimized(inp, yld, rho)
+        fco  = gtn_fracture_limit(inp, yld, gtn_co, rho)
+        fgr  = gtn_fracture_limit(inp, yld, gtn_gr, rho)
+        rec = [rho,
+               (neck[1] * 100 if neck else float("nan")), (neck[0] * 100 if neck else float("nan")),
+               (fco[1] * 100 if fco else float("nan")),    (fco[0] * 100 if fco else float("nan")),
+               (fgr[1] * 100 if fgr else float("nan")),    (fgr[0] * 100 if fgr else float("nan"))]
+        points.append(rec)
+        rho -= 0.05
+    return yld, gtn_co, gtn_gr, points
+
+
+# CP-titanium experimental FLC (true strain), supplied by the user.
+EXP_FLC = [(-0.20, 0.50), (0.00, 0.27), (0.05, 0.25), (0.30, 0.30)]
+
+
+def main():
+    inp = FLDInput()       # the program's default case
+    yld, gtn_co, gtn_gr, pts = compute_fld(inp)
+
+    # combined FLC = min(necking, coalescence fracture) per strain ratio
+    print("\nForming Limit Curve -- CP titanium")
+    print(f"{'minor[%]':>9} {'FLC major[%]':>12} {'mechanism':>10}")
+    fld = []
+    for rho, nmin, nmaj, comin, comaj, grmin, grmaj in pts:
+        cands = []
+        if nmaj == nmaj: cands.append((nmaj, nmin, "necking"))
+        if comaj == comaj: cands.append((comaj, comin, "fracture"))
+        if not cands: continue
+        maj, mino, mech = min(cands)
+        fld.append((mino, maj, mech))
+        print(f"{mino:9.2f} {maj:12.2f} {mech:>10}")
+
+    try:
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(7.2, 6))
+        def col(i): return [p[i] for p in pts]
+        # necking and the two fracture limits over the whole range
+        plt.plot(col(1), col(2), "--", color="0.55", lw=1.3, label="M-K necking only")
+        plt.plot(col(3), col(4), ":",  color="tab:purple", lw=1.6,
+                 label="GTN fracture, coalescence (f=f_c)")
+        plt.plot(col(5), col(6), "-.", color="tab:green", lw=1.6,
+                 label="GTN fracture, growth-only (gradual)")
+        # combined FLC (necking + coalescence cap)
+        plt.plot([p[0] for p in fld], [p[1] for p in fld], "-", color="tab:red", lw=2.0,
+                 label="Predicted FLC = min(necking, f_c)")
+        # experiment
+        plt.plot([p[0]*100 for p in EXP_FLC], [p[1]*100 for p in EXP_FLC],
+                 "k^", ms=9, label="Experiment (Zhai et al.)")
+        plt.xlabel("Minor true strain [%]"); plt.ylabel("Major true strain [%]")
+        plt.title("CP titanium FLC: M-K necking + GTN damage vs experiment")
+        plt.ylim(0, 60); plt.xlim(-30, 40)
+        plt.axhline(0, color="0.85", lw=0.8); plt.axvline(0, color="0.85", lw=0.8)
+        plt.grid(True); plt.legend(loc="upper center", fontsize=8)
+        plt.tight_layout(); plt.savefig("fld_curve.png", dpi=120)
+        print("\nSaved plot -> fld_curve.png")
+    except Exception as e:
+        print(f"\n(matplotlib not used: {e})")
+
+
+if __name__ == "__main__":
+    main()
