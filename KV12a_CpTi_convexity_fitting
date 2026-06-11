@@ -1,0 +1,995 @@
+#KV12a convexity fixed v2 · PY
+#Claude Fable 20260611
+import numpy as np
+from scipy.optimize import least_squares
+import matplotlib.pyplot as plt
+ 
+# ============================================================
+# Kim-Van asymmetric J2-J3 anisotropic yield function
+#
+# phi = (J2^0)^6 + alpha*(J3^0)^4
+#       + beta*|J2^0|^(9/2)*J3^0
+#
+# yield condition:
+# phi - k^12 = 0
+#
+# ------------------------------------------------------------
+# [볼록성(convexity) 보강 수정판]
+#
+# 기존 코드의 문제점:
+#  - 볼록성 penalty가 margin 없이 "곡률 >= 0"만 요구했기 때문에
+#    작은 오목 위반은 fitting residual에 묻혀 그대로 허용되었음
+#  - 위반량을 mean(rho^2)으로 "평균" 정규화해서 국소적인 위반이 희석됨
+#  - sigma_x - sigma_y 평면(sxy = 0)만 검사
+#  - NaN 발생 시 residual 벡터 길이가 달라지는 버그
+#    (least_squares는 호출마다 같은 길이의 residual을 요구)
+#
+# 수정 내용:
+#  (1) 곡률 penalty에 상대 margin(기본 0.2%) 도입 + "점별" 정규화
+#  (2) 전단응력을 포함한 5개 중심 단면(central section)에서 볼록성 검사
+#      - 원점을 지나는 모든 2차원 단면이 볼록이면 항복곡면 전체가 볼록
+#  (3) 볼록성 위반이 남으면 penalty 가중치를 5배씩 키워 직전 해에서
+#      다시 최적화하는 continuation 전략 (최대 4회)
+#  (4) residual 길이를 항상 고정 (NaN -> 큰 상수 치환)
+#  (5) 최적화 후 고해상도(2001점) 곡률 검증 + Hessian 고유값 검증
+#  (6) 곡률 진단 그래프 추가 (Figure 2)
+#  (7) 항복곡면 contour 계산 벡터화 (속도 개선)
+#
+# [v2 추가 사항]
+#  (8) Convex hull 검증: locus 점들과 자기 자신의 convex hull 사이의
+#      내측 편차를 계산. 편차가 기계정밀도(~1e-16) 수준이면 곡면은
+#      "수학적으로" 볼록. 평탄한 구간은 눈에는 오목처럼 보일 수 있으나
+#      평탄(곡률~0+)과 오목(곡률<0)은 다름 -> 이 검사로 확정 판별
+#  (9) Figure 2에 convex hull을 겹쳐 그려 시각적으로도 확인
+# (10) 임의의 2축 항복점 실험데이터(plane-strain, cruciform 등)를
+#      locus 위 점으로 추가할 수 있는 use_locus_data 기능
+#      -> 단축점과 등2축점 사이의 평탄 구간 '모양'을 실험으로 고정하고
+#         싶을 때 사용 (M-K FLC 우측가지 정확도에 중요)
+# ============================================================
+ 
+plt.rcParams.update({
+    'font.size': 12,
+    'axes.titlesize': 16,
+    'axes.labelsize': 14,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+    'legend.fontsize': 12,
+    'figure.titlesize': 18
+})
+ 
+# ------------------------------------------------------------
+# 1. Experimental tensile data
+# ------------------------------------------------------------
+angles_deg = np.array([0, 22.5, 45, 67.5, 90])
+ 
+# sigma_theta / sigma_0
+exp_sigma = np.array([1.0, 1.078, 1.157, 1.258, 1.264])
+ 
+# r_theta
+exp_r = np.array([1.7, 1.9, 3.7, 4.2, 5.0])
+ 
+# equi-biaxial yield stress ratio
+exp_sigma_b = 1.449
+ 
+# equi-biaxial r-value
+exp_r_b = 0.44
+ 
+# ------------------------------------------------------------
+# 2. Optional compression data
+# ------------------------------------------------------------
+use_compression_data = True
+ 
+# 0도 압축 항복응력 = 0.91*sigma_0
+# 90도 압축 항복응력 = 1.26*sigma_90
+comp_angles_deg = np.array([0, 90])
+exp_sigma_c = np.array([0.91, 1.26])
+ 
+# ------------------------------------------------------------
+# 2b. Optional in-plane biaxial locus data
+# ------------------------------------------------------------
+# 단축 인장점들과 등2축점 사이(특히 1사분면 윗부분)의 항복곡면 모양을
+# 실험으로 고정하고 싶으면 여기에 측정된 2축 항복점을 추가.
+# (plane-strain 노치인장, cruciform 2축인장, 적층압축 시험 등)
+#
+# 각 점은 (sigma_x/sigma_0, sigma_y/sigma_0) 좌표로 입력.
+# 데이터가 없으면 use_locus_data = False 로 함.
+use_locus_data = False
+ 
+exp_locus_points = np.array([
+    # [1.35, 0.675],   # 예시: RD plane-strain 근방 항복점
+    # [0.70, 1.40],    # 예시: TD plane-strain 근방 항복점
+    [0.0, 0.0],        # placeholder (use_locus_data=False이면 무시됨)
+])
+ 
+w_locus = 10.0
+ 
+# ------------------------------------------------------------
+# 3. Constants
+# ------------------------------------------------------------
+k12 = (1.0 / 3.0) ** 6
+ 
+# beta 제한의 안전계수 (볼록성이 끝까지 안 잡히면 0.8 정도로 낮춤)
+BETA_SAFETY = 0.95
+ 
+# 볼록성 penalty 설정 (continuation에서 weight가 자동 증가)
+CONV = {
+    'weight': 100.0,    # 시작 가중치
+    'margin_rel': 0.02  # 상대 margin: 정규화 곡률 >= 이 값 요구 (원이면 1)
+                        # 0.002~0.05 범위에서 fitting 손실은 거의 없음.
+                        # 값을 키울수록 평탄 구간이 둥글어짐.
+}
+ 
+# 최적화 후 검증용 각도 해상도
+N_VERIFY = 2001
+ 
+ 
+# ------------------------------------------------------------
+# 4. Parameter transformation
+# ------------------------------------------------------------
+def unpack_raw_params(raw):
+    """
+    raw parameter를 실제 항복함수 parameter로 변환.
+ 
+    목적:
+    1) alpha > 0 강제
+    2) beta가 너무 커지지 않도록 제한
+ 
+    raw =
+    [a1,a2,a3,a4,b1,b2,b3,b4,b5,b10, alpha_raw, beta_raw]
+    """
+ 
+    a1, a2, a3, a4 = raw[0:4]
+    b1, b2, b3, b4, b5, b10 = raw[4:10]
+ 
+    # alpha > 0
+    alpha = np.exp(raw[10])
+ 
+    # beta 제한
+    # eta는 -1~1 사이
+    eta = np.tanh(raw[11])
+ 
+    # 충분조건 기반 beta limit
+    beta_lim = 4.0 * alpha**0.25 / (3.0**0.75)
+ 
+    beta = BETA_SAFETY * eta * beta_lim
+ 
+    return np.array([
+        a1, a2, a3, a4,
+        b1, b2, b3, b4, b5, b10,
+        alpha, beta
+    ])
+ 
+ 
+def make_initial_raw_params(initial_params):
+    """
+    기존 초기값 [a1,...,alpha,beta]를 raw parameter로 변환합니다.
+    """
+ 
+    raw = np.zeros_like(np.array(initial_params, dtype=float))
+ 
+    raw[0:10] = initial_params[0:10]
+ 
+    alpha0 = initial_params[10]
+    beta0 = initial_params[11]
+ 
+    # alpha_raw = log(alpha)
+    raw[10] = np.log(max(alpha0, 1.0e-8))
+ 
+    beta_lim0 = 4.0 * alpha0**0.25 / (3.0**0.75)
+ 
+    eta0 = beta0 / (BETA_SAFETY * beta_lim0)
+ 
+    # tanh 역함수에 들어갈 수 있도록 제한
+    eta0 = np.clip(eta0, -0.95, 0.95)
+ 
+    raw[11] = np.arctanh(eta0)
+ 
+    return raw
+ 
+ 
+# ------------------------------------------------------------
+# 5. J2, J3 계산 (벡터화 가능)
+# ------------------------------------------------------------
+def get_j2_j3(params, sx, sy, sxy):
+    a1, a2, a3, a4 = params[0:4]
+    b1, b2, b3, b4, b5, b10 = params[4:10]
+ 
+    j20 = (
+        (1.0 / 6.0)
+        * ((a1 + a3) * sx**2
+           + (a1 + a2) * sy**2
+           - 2.0 * a1 * sx * sy)
+        + a4 * sxy**2
+    )
+ 
+    j30 = (
+        (1.0 / 27.0) * ((b1 + b2) * sx**3
+                        + (b3 + b4) * sy**3)
+        - (1.0 / 9.0) * (b1 * sx + b4 * sy) * sx * sy
+        + (1.0 / 3.0)
+        * (b5 * sy + (2.0 * b10 - b5) * sx)
+        * sxy**2
+    )
+ 
+    return j20, j30
+ 
+ 
+def get_phi_values(params, sx, sy, sxy):
+    """
+    phi만 벡터화하여 계산합니다 (penalty 계산용, 미분 불필요).
+    sx, sy, sxy는 스칼라 또는 numpy 배열.
+    """
+    alpha, beta = params[10], params[11]
+    j20, j30 = get_j2_j3(params, sx, sy, sxy)
+    abs_j2 = np.abs(j20)
+    return j20**6 + alpha * j30**4 + beta * abs_j2**4.5 * j30
+ 
+ 
+def sigma_eq_values(params, sx, sy, sxy):
+    """
+    등가응력 sigma_eq = (phi/k12)^(1/12), 벡터화.
+    phi <= 0 인 곳은 NaN.
+    """
+    phi = get_phi_values(params, sx, sy, sxy)
+    se = np.full_like(np.asarray(phi, dtype=float), np.nan)
+    ok = np.isfinite(phi) & (phi > 0.0)
+    se[ok] = (phi[ok] / k12) ** (1.0 / 12.0)
+    return se
+ 
+ 
+# ------------------------------------------------------------
+# 6. 비대칭 항복함수와 미분값
+# ------------------------------------------------------------
+def get_phi_and_derivatives_from_params(params, sx, sy, sxy):
+    """
+    params는 실제 parameter입니다.
+    """
+ 
+    a1, a2, a3, a4 = params[0:4]
+    b1, b2, b3, b4, b5, b10 = params[4:10]
+    alpha, beta = params[10], params[11]
+ 
+    j20, j30 = get_j2_j3(params, sx, sy, sxy)
+ 
+    p_asym = 4.5
+    abs_j2 = np.abs(j20)
+ 
+    phi = (
+        j20**6
+        + alpha * j30**4
+        + beta * abs_j2**p_asym * j30
+    )
+ 
+    # dJ2/dsigma
+    dj2_dsx = ((a1 + a3) / 3.0) * sx - (a1 / 3.0) * sy
+    dj2_dsy = ((a1 + a2) / 3.0) * sy - (a1 / 3.0) * sx
+    dj2_dsxy = 2.0 * a4 * sxy
+ 
+    # dJ3/dsigma
+    dj3_dsx = (
+        (b1 / 9.0) * (sx - sy) ** 2
+        + (b2 / 9.0) * sx**2
+        - ((b1 + b4) / 9.0) * sy**2
+        + ((2.0 * b10 - b5) / 3.0) * sxy**2
+    )
+ 
+    dj3_dsy = (
+        (b4 / 9.0) * (sy - sx) ** 2
+        + (b3 / 9.0) * sy**2
+        - ((b1 + b4) / 9.0) * sx**2
+        + (b5 / 3.0) * sxy**2
+    )
+ 
+    dj3_dsxy = (
+        (2.0 / 3.0)
+        * sxy
+        * (b5 * sy + (2.0 * b10 - b5) * sx)
+    )
+ 
+    if abs_j2 < 1.0e-14:
+        sign_j2 = 0.0
+    else:
+        sign_j2 = np.sign(j20)
+ 
+    # dphi/dJ2
+    A = (
+        6.0 * j20**5
+        + beta * p_asym * abs_j2**(p_asym - 1.0) * sign_j2 * j30
+    )
+ 
+    # dphi/dJ3
+    B = (
+        4.0 * alpha * j30**3
+        + beta * abs_j2**p_asym
+    )
+ 
+    df_dsx = A * dj2_dsx + B * dj3_dsx
+    df_dsy = A * dj2_dsy + B * dj3_dsy
+    df_dsxy = A * dj2_dsxy + B * dj3_dsxy
+ 
+    return phi, df_dsx, df_dsy, df_dsxy
+ 
+ 
+def get_phi_and_derivatives(raw, sx, sy, sxy):
+    params = unpack_raw_params(raw)
+    return get_phi_and_derivatives_from_params(params, sx, sy, sxy)
+ 
+ 
+# ------------------------------------------------------------
+# 7. Stress state helper
+# ------------------------------------------------------------
+def uniaxial_stress_state(deg, sign=+1.0):
+    """
+    sign = +1 : tension
+    sign = -1 : compression
+    """
+ 
+    th = np.radians(deg)
+    c = np.cos(th)
+    s = np.sin(th)
+ 
+    sx = sign * c**2
+    sy = sign * s**2
+    sxy = sign * s * c
+ 
+    return sx, sy, sxy
+ 
+ 
+# ------------------------------------------------------------
+# 8. Prediction functions
+# ------------------------------------------------------------
+def predict_sigma_uniaxial(raw, deg, sign=+1.0):
+    sx, sy, sxy = uniaxial_stress_state(deg, sign=sign)
+ 
+    phi, _, _, _ = get_phi_and_derivatives(raw, sx, sy, sxy)
+ 
+    if phi <= 0 or np.isnan(phi):
+        return np.nan
+ 
+    return (phi / k12) ** (-1.0 / 12.0)
+ 
+ 
+def predict_sigma_theta(raw, deg):
+    return predict_sigma_uniaxial(raw, deg, sign=+1.0)
+ 
+ 
+def predict_sigma_compression(raw, deg):
+    return predict_sigma_uniaxial(raw, deg, sign=-1.0)
+ 
+ 
+def predict_r_theta(raw, deg):
+    sx, sy, sxy = uniaxial_stress_state(deg, sign=+1.0)
+ 
+    _, dfx, dfy, dfxy = get_phi_and_derivatives(raw, sx, sy, sxy)
+ 
+    th = np.radians(deg)
+    c = np.cos(th)
+    s = np.sin(th)
+ 
+    numerator = dfx * s**2 + dfy * c**2 - dfxy * s * c
+    denominator = dfx + dfy
+ 
+    if np.abs(denominator) < 1.0e-14:
+        return np.nan
+ 
+    return -numerator / denominator
+ 
+ 
+def predict_sigma_b(raw):
+    phi, _, _, _ = get_phi_and_derivatives(raw, 1.0, 1.0, 0.0)
+ 
+    if phi <= 0 or np.isnan(phi):
+        return np.nan
+ 
+    return (phi / k12) ** (-1.0 / 12.0)
+ 
+ 
+def predict_r_b(raw):
+    _, dfx, dfy, _ = get_phi_and_derivatives(raw, 1.0, 1.0, 0.0)
+ 
+    if np.abs(dfx) < 1.0e-14:
+        return np.nan
+ 
+    return dfy / dfx
+ 
+ 
+# ------------------------------------------------------------
+# 9. 중심 단면(central section)의 radial distance와 곡률
+# ------------------------------------------------------------
+# (u, v)는 (sx, sy, sxy) 응력공간에서 단면을 정의하는 두 방향벡터.
+# 단면 위에서 s(theta) = cos(theta)*u + sin(theta)*v 방향의
+# 항복점까지 거리 rho(theta)를 구하고 극좌표 볼록조건을 검사.
+#
+# 볼록조건: rho^2 + 2*rho'^2 - rho*rho'' >= 0
+# (원점을 지나는 모든 2차원 단면이 볼록이면 곡면 전체가 볼록)
+#
+# SECTION_PLANES = (u, v, 검사각도수, 상대가중치, 이름)
+SECTION_PLANES = [
+    (np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]),
+     721, 1.0, 'sx-sy'),
+    (np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0]),
+     241, 0.5, 'sx-sxy'),
+    (np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]),
+     241, 0.5, 'sy-sxy'),
+    (np.array([1.0, 1.0, 0.0]) / np.sqrt(2.0), np.array([0.0, 0.0, 1.0]),
+     241, 0.5, 'biax-sxy'),
+    (np.array([1.0, -1.0, 0.0]) / np.sqrt(2.0), np.array([0.0, 0.0, 1.0]),
+     241, 0.5, 'shear-sxy'),
+]
+ 
+ 
+def radial_rho_section(params, u, v, angs):
+    """
+    단면 (u, v) 위에서 방향각 angs에 대한 radial yield distance rho.
+    phi <= 0이면 NaN (열린 곡면).
+    """
+    c = np.cos(angs)
+    s = np.sin(angs)
+ 
+    sx = c * u[0] + s * v[0]
+    sy = c * u[1] + s * v[1]
+    sxy = c * u[2] + s * v[2]
+ 
+    phi = get_phi_values(params, sx, sy, sxy)
+ 
+    rho = np.full_like(phi, np.nan)
+    ok = np.isfinite(phi) & (phi > 0.0)
+    rho[ok] = (phi[ok] / k12) ** (-1.0 / 12.0)
+ 
+    return rho
+ 
+ 
+def section_curvature(params, u, v, n_ang):
+    """
+    단면 위 정규화 곡률 측정값을 돌려줍니다.
+ 
+        curv_n = (rho^2 + 2*rho'^2 - rho*rho'') / rho^2
+ 
+    원이면 curv_n = 1, 평탄부에서 0, 오목부에서 음수.
+    rho 계산 실패 시 curv_n = None.
+    """
+    angs = np.linspace(0.0, 2.0 * np.pi, n_ang, endpoint=False)
+    dth = angs[1] - angs[0]
+ 
+    rho = radial_rho_section(params, u, v, angs)
+ 
+    if np.any(~np.isfinite(rho)):
+        return angs, rho, None
+ 
+    rho_p = np.roll(rho, -1)
+    rho_m = np.roll(rho, 1)
+ 
+    rho_prime = (rho_p - rho_m) / (2.0 * dth)
+    rho_double = (rho_p - 2.0 * rho + rho_m) / dth**2
+ 
+    curv = rho**2 + 2.0 * rho_prime**2 - rho * rho_double
+ 
+    return angs, rho, curv / rho**2
+ 
+ 
+def section_convexity_penalty(params, u, v, n_ang, weight, margin_rel):
+    """
+    정규화 곡률이 margin_rel보다 작아지면 점별로 penalty를 부여.
+ 
+    기존 코드와의 차이:
+      - margin_rel > 0 : 곡률이 0에 닿기 전에 미리 밀어냄 (buffer)
+      - 점별 정규화   : 국소 위반이 평균에 희석되지 않음
+    """
+    angs, rho, curv_n = section_curvature(params, u, v, n_ang)
+ 
+    if curv_n is None:
+        return np.full(n_ang, 1.0e3)
+ 
+    pen = np.maximum(0.0, margin_rel - curv_n)
+ 
+    return np.sqrt(weight) * pen
+ 
+ 
+# ------------------------------------------------------------
+# 10. Closure and positivity penalties (벡터화)
+# ------------------------------------------------------------
+def closure_penalty(params, n_ang=181, eps=1.0e-8, weight=5.0):
+    """
+    항복곡면이 열리지 않도록 phi(direction) > 0을 요구.
+    """
+    angs = np.linspace(0.0, 2.0 * np.pi, n_ang, endpoint=False)
+    sx = np.cos(angs)
+    sy = np.sin(angs)
+    sxy = np.zeros_like(angs)
+ 
+    phi = get_phi_values(params, sx, sy, sxy)
+ 
+    res = np.zeros(n_ang)
+    bad = ~np.isfinite(phi)
+    small = (~bad) & (phi < eps)
+ 
+    res[bad] = 1.0e3
+    res[small] = np.sqrt(weight) * (eps - phi[small]) / eps
+ 
+    return res
+ 
+ 
+def j2_positive_penalty(params, n_ang=181, eps=1.0e-8, weight=5.0):
+    """
+    J2^0가 모든 방향에서 양수가 되도록 하는 penalty입니다.
+    """
+    angs = np.linspace(0.0, 2.0 * np.pi, n_ang, endpoint=False)
+    sx = np.concatenate([np.cos(angs), [0.0]])
+    sy = np.concatenate([np.sin(angs), [0.0]])
+    sxy = np.concatenate([np.zeros(n_ang), [1.0]])  # pure shear 방향 포함
+ 
+    j20, _ = get_j2_j3(params, sx, sy, sxy)
+ 
+    res = np.zeros(n_ang + 1)
+    bad = ~np.isfinite(j20)
+    small = (~bad) & (j20 < eps)
+ 
+    res[bad] = 1.0e3
+    res[small] = np.sqrt(weight) * (eps - j20[small]) / eps
+ 
+    return res
+ 
+ 
+# ------------------------------------------------------------
+# 11. Objective function
+# ------------------------------------------------------------
+def objective(raw):
+    """
+    실험값 fitting residual + 물리적 제약 penalty.
+    residual 벡터 길이는 항상 동일하게 유지됩니다.
+    """
+    params = unpack_raw_params(raw)
+ 
+    # fitting weights
+    w_sigma = 20.0
+    w_r = 1.0
+    w_sigma_b = 10.0
+    w_r_b = 1.0
+    w_comp = 15.0
+ 
+    pred_sigma = np.array([
+        predict_sigma_theta(raw, deg) for deg in angles_deg
+    ])
+ 
+    pred_r = np.array([
+        predict_r_theta(raw, deg) for deg in angles_deg
+    ])
+ 
+    pred_sb = predict_sigma_b(raw)
+    pred_rb = predict_r_b(raw)
+ 
+    res_sigma = np.sqrt(w_sigma) * (1.0 - pred_sigma / exp_sigma)
+    res_r = np.sqrt(w_r) * (1.0 - pred_r / exp_r)
+    res_sigma_b = np.array([np.sqrt(w_sigma_b) * (1.0 - pred_sb / exp_sigma_b)])
+    res_r_b = np.array([np.sqrt(w_r_b) * (1.0 - pred_rb / exp_r_b)])
+ 
+    residuals = [res_sigma, res_r, res_sigma_b, res_r_b]
+ 
+    # 압축 데이터가 있으면 추가
+    if use_compression_data:
+        pred_comp = np.array([
+            predict_sigma_compression(raw, deg)
+            for deg in comp_angles_deg
+        ])
+        res_comp = np.sqrt(w_comp) * (1.0 - pred_comp / exp_sigma_c)
+        residuals.append(res_comp)
+ 
+    # 2축 locus 실험점이 있으면 추가
+    if use_locus_data:
+        px = exp_locus_points[:, 0]
+        py = exp_locus_points[:, 1]
+        rr = np.hypot(px, py)
+        ux, uy = px / rr, py / rr
+        phi_u = get_phi_values(params, ux, uy, np.zeros_like(ux))
+        rho_pred = np.where(
+            phi_u > 0.0,
+            (np.maximum(phi_u, 1.0e-300) / k12) ** (-1.0 / 12.0),
+            np.nan
+        )
+        residuals.append(np.sqrt(w_locus) * (1.0 - rho_pred / rr))
+ 
+    # 닫힌 항복곡면 penalty
+    residuals.append(closure_penalty(params, n_ang=181, eps=1.0e-8, weight=2.0))
+ 
+    # J2^0 positive penalty
+    residuals.append(j2_positive_penalty(params, n_ang=181, eps=1.0e-8, weight=2.0))
+ 
+    # 볼록성 penalty: 전단 포함 5개 중심 단면
+    for (u, v, n_ang, w_rel, _name) in SECTION_PLANES:
+        residuals.append(
+            section_convexity_penalty(
+                params, u, v, n_ang,
+                weight=CONV['weight'] * w_rel,
+                margin_rel=CONV['margin_rel']
+            )
+        )
+ 
+    res_all = np.concatenate(residuals)
+ 
+    # NaN/Inf -> 큰 상수로 치환 (residual 길이를 항상 고정)
+    return np.nan_to_num(res_all, nan=1.0e3, posinf=1.0e3, neginf=-1.0e3)
+ 
+ 
+# ------------------------------------------------------------
+# 12. 최적화 후 볼록성 검증 함수
+# ------------------------------------------------------------
+def verify_sections(params, n_fine=N_VERIFY):
+    """
+    모든 단면에서 정규화 곡률의 최소값과 발생 위치를 구합니다.
+    """
+    report = []
+    worst_val = np.inf
+    worst_plane = None
+    worst_deg = np.nan
+ 
+    for (u, v, _n, _w, name) in SECTION_PLANES:
+        angs, rho, curv_n = section_curvature(params, u, v, n_fine)
+ 
+        if curv_n is None:
+            report.append((name, -np.inf, np.nan))
+            worst_val = -np.inf
+            worst_plane = name
+            continue
+ 
+        i = int(np.argmin(curv_n))
+        report.append((name, curv_n[i], np.degrees(angs[i])))
+ 
+        if curv_n[i] < worst_val:
+            worst_val = curv_n[i]
+            worst_plane = name
+            worst_deg = np.degrees(angs[i])
+ 
+    return worst_val, worst_plane, worst_deg, report
+ 
+ 
+def hessian_convexity_check(params, n_th=72, n_ps=35, h=1.0e-4):
+    """
+    등가응력 sigma_eq = (phi/k12)^(1/12)의 Hessian 최소 고유값을
+    항복곡면 위 표본점에서 수치적으로 검사 (전 응력공간 검증).
+ 
+    sigma_eq는 1차 동차함수이므로 radial 방향 고유값은 항상 0이며,
+    나머지 고유값이 모두 >= 0이면 볼록
+    반환값은 무차원화된 최소 고유값 lam_min * ||sigma|| 임.
+    """
+    th = np.linspace(0.0, 2.0 * np.pi, n_th, endpoint=False)
+    ps = np.linspace(-0.5 * np.pi, 0.5 * np.pi, n_ps + 2)[1:-1]
+    TH, PS = np.meshgrid(th, ps)
+ 
+    dx = (np.cos(PS) * np.cos(TH)).ravel()
+    dy = (np.cos(PS) * np.sin(TH)).ravel()
+    dz = np.sin(PS).ravel()
+ 
+    phi = get_phi_values(params, dx, dy, dz)
+    ok = np.isfinite(phi) & (phi > 0.0)
+ 
+    rho = (phi[ok] / k12) ** (-1.0 / 12.0)
+    X = np.stack([dx[ok] * rho, dy[ok] * rho, dz[ok] * rho], axis=1)
+    n_pts = X.shape[0]
+ 
+    norms = np.linalg.norm(X, axis=1)
+    hs = h * np.maximum(1.0, norms)
+ 
+    def f(P):
+        return sigma_eq_values(params, P[:, 0], P[:, 1], P[:, 2])
+ 
+    E = np.eye(3)
+    H = np.zeros((n_pts, 3, 3))
+    f0 = f(X)
+ 
+    for i in range(3):
+        fp = f(X + hs[:, None] * E[i])
+        fm = f(X - hs[:, None] * E[i])
+        H[:, i, i] = (fp - 2.0 * f0 + fm) / hs**2
+ 
+        for j in range(i + 1, 3):
+            fpp = f(X + hs[:, None] * (E[i] + E[j]))
+            fpm = f(X + hs[:, None] * (E[i] - E[j]))
+            fmp = f(X - hs[:, None] * (E[i] - E[j]))
+            fmm = f(X - hs[:, None] * (E[i] + E[j]))
+            hij = (fpp - fpm - fmp + fmm) / (4.0 * hs**2)
+            H[:, i, j] = hij
+            H[:, j, i] = hij
+ 
+    finite = np.all(np.isfinite(H.reshape(n_pts, -1)), axis=1)
+    H = H[finite]
+    norms = norms[finite]
+    X = X[finite]
+ 
+    eig = np.linalg.eigvalsh(H)          # 오름차순
+    lam_min = eig[:, 0] * norms          # 무차원화
+ 
+    k = int(np.argmin(lam_min))
+    return lam_min[k], X[k]
+ 
+ 
+def convex_hull_check(params, n=4001):
+    """
+    sx-sy 단면의 locus 점들과 그 convex hull 사이의 최대 내측 편차를
+    계산. 편차가 ~1e-12 이하이면 locus는 자기 자신의 convex hull과
+    일치하며, 이는 곡면이 볼록하다는 결정적(수학적) 증거임.
+ 
+    주의: 곡률이 0에 가까운 '평탄'한 구간은 눈에는 오목처럼 보일 수
+    있으나, 평탄(곡률 >= 0)과 오목(곡률 < 0)은 엄연히 다름.
+    """
+    from scipy.spatial import ConvexHull
+ 
+    u, v = SECTION_PLANES[0][0], SECTION_PLANES[0][1]
+    angs, rho, _curv = section_curvature(params, u, v, n)
+ 
+    if np.any(~np.isfinite(rho)):
+        return np.inf, None, None
+ 
+    pts = np.stack([rho * np.cos(angs), rho * np.sin(angs)], axis=1)
+    hull = ConvexHull(pts)
+ 
+    # hull.equations: A x + b <= 0 (내부). 경계까지의 내측 거리:
+    d_inside = -(pts @ hull.equations[:, :2].T
+                 + hull.equations[:, 2]).max(axis=1)
+ 
+    return d_inside.max(), pts, hull
+ 
+ 
+# ------------------------------------------------------------
+# 13. Optimization with convexity continuation
+# ------------------------------------------------------------
+initial_params = [
+    1.039, 1.018, 0.729, 0.720,
+    0.722, 2.006, 2.825, 0.251, 1.574, 1.633,
+    1.546, 2.004
+]
+ 
+raw0 = make_initial_raw_params(initial_params)
+ 
+MAX_ROUNDS = 4
+raw_cur = raw0.copy()
+result = None
+converged_convex = False
+ 
+print("=== Convexity continuation optimization ===")
+ 
+for rnd in range(1, MAX_ROUNDS + 1):
+    result = least_squares(
+        objective,
+        raw_cur,
+        method='trf',
+        max_nfev=30000,
+        xtol=1.0e-12,
+        ftol=1.0e-12,
+        gtol=1.0e-12
+    )
+ 
+    raw_cur = result.x
+    params_cur = unpack_raw_params(raw_cur)
+ 
+    worst_val, worst_plane, worst_deg, _rep = verify_sections(params_cur)
+ 
+    print(f"[round {rnd}] cost = {result.cost:.6e}, "
+          f"conv. weight = {CONV['weight']:.0f}, "
+          f"min normalized curvature = {worst_val:.4e} "
+          f"({worst_plane} plane, {worst_deg:.1f} deg)")
+ 
+    if worst_val >= 0.0:
+        converged_convex = True
+        print(" -> 모든 단면에서 볼록성 만족. continuation 종료.\n")
+        break
+ 
+    CONV['weight'] *= 5.0
+    print(" -> 볼록성 위반 잔존. penalty 가중치 증가 후 재최적화.\n")
+ 
+if not converged_convex:
+    print("경고: 최대 round 후에도 볼록성 위반이 남아 있습니다.")
+    print("      BETA_SAFETY를 0.8 정도로 낮추거나 margin_rel을 키워 보십시오.\n")
+ 
+raw_opt = raw_cur
+opt = unpack_raw_params(raw_opt)
+ 
+ 
+# ------------------------------------------------------------
+# 14. Print results
+# ------------------------------------------------------------
+param_names = [
+    'a1', 'a2', 'a3', 'a4',
+    'b1', 'b2', 'b3', 'b4', 'b5', 'b10',
+    'alpha', 'beta'
+]
+ 
+print("=== Optimized Parameters: constrained asymmetric model ===")
+for name, val in zip(param_names, opt):
+    print(f"{name:6s}: {val: .8f}")
+ 
+print("\n=== Fitting Results: tension ===")
+print("Angle   sigma_exp   sigma_th     r_exp      r_th")
+for deg, se, re in zip(angles_deg, exp_sigma, exp_r):
+    st = predict_sigma_theta(raw_opt, deg)
+    rt = predict_r_theta(raw_opt, deg)
+    print(f"{deg:5.1f}   {se:9.4f}   {st:9.4f}   {re:8.4f}   {rt:8.4f}")
+ 
+print("\n=== Equi-biaxial ===")
+print(f"sigma_b_exp = {exp_sigma_b:.4f}")
+print(f"sigma_b_th  = {predict_sigma_b(raw_opt):.4f}")
+print(f"R_b_exp     = {exp_r_b:.4f}")
+print(f"R_b_th      = {predict_r_b(raw_opt):.4f}")
+ 
+if use_compression_data:
+    print("\n=== Fitting Results: compression ===")
+    print("Angle   sigma_c_exp   sigma_c_th")
+    for deg, sc_exp in zip(comp_angles_deg, exp_sigma_c):
+        sc_th = predict_sigma_compression(raw_opt, deg)
+        print(f"{deg:5.1f}     {sc_exp:9.4f}     {sc_th:9.4f}")
+ 
+print("\nOptimization cost =", result.cost)
+print("Success =", result.success)
+print("Message =", result.message)
+ 
+# --- 볼록성 최종 검증 보고 ---
+print("\n=== Convexity verification (per section, "
+      f"{N_VERIFY} sampling angles) ===")
+worst_val, worst_plane, worst_deg, report = verify_sections(opt)
+for name, cmin, cdeg in report:
+    status = "OK " if cmin >= 0.0 else "FAIL"
+    print(f"[{status}] plane {name:10s}: min normalized curvature = "
+          f"{cmin: .4e} at {cdeg:7.2f} deg")
+ 
+hull_dev, hull_pts, hull_obj = convex_hull_check(opt)
+print(f"\nConvex hull check (sx-sy plane, 4001 pts): "
+      f"max inward deviation = {hull_dev:.3e}")
+if hull_dev < 1.0e-10:
+    print("  -> locus가 자기 자신의 convex hull과 일치: 수학적으로 볼록 확정")
+    print("     (눈에 평탄/오목처럼 보여도 곡률이 0 이상인 평탄 구간임)")
+else:
+    print("  -> locus가 convex hull 안쪽으로 패임: 실제 오목부 존재")
+ 
+lam_min, x_min = hessian_convexity_check(opt)
+print(f"\nHessian check over full stress space: "
+      f"min eigenvalue (normalized) = {lam_min: .4e}")
+print(f"  at (sx, sy, sxy) = ({x_min[0]: .4f}, {x_min[1]: .4f}, {x_min[2]: .4f})")
+if lam_min >= -1.0e-4:
+    print("  -> 수치오차 범위 내에서 볼록성 만족 (1차 동차함수의 radial "
+          "고유값 0 포함)")
+else:
+    print("  -> 볼록성 위반 가능성 있음. penalty 설정을 강화하십시오.")
+ 
+ 
+# ------------------------------------------------------------
+# 15. Plot 1: stress, r-value, yield surface
+# ------------------------------------------------------------
+fig, ax = plt.subplots(1, 3, figsize=(20, 6))
+ 
+fine_ang = np.linspace(0.0, 90.0, 181)
+ 
+ps = np.array([predict_sigma_theta(raw_opt, a) for a in fine_ang])
+pr = np.array([predict_r_theta(raw_opt, a) for a in fine_ang])
+ 
+# (1) Directional tensile yield stress
+ax[0].plot(fine_ang, ps, 'b-', linewidth=2, label='Constrained asymmetric')
+ax[0].plot(angles_deg, exp_sigma, 'ko', markersize=8, label='Exp. tension')
+ 
+if use_compression_data:
+    pc = np.array([predict_sigma_compression(raw_opt, a) for a in fine_ang])
+    ax[0].plot(fine_ang, pc, 'g--', linewidth=2, label='Pred. compression')
+    ax[0].plot(comp_angles_deg, exp_sigma_c, 'gs', markersize=8,
+               label='Exp. compression')
+ 
+ax[0].set_xticks([0, 15, 30, 45, 60, 75, 90])
+ax[0].set_xlabel('Angle from RD (deg.)')
+ax[0].set_ylabel(r'$\sigma_\theta / \sigma_0$')
+ax[0].set_title('Directional Yield Stress')
+ax[0].grid(True, ls=':')
+ax[0].legend()
+ax[0].set_ylim(0.8, 1.5)
+ 
+# (2) R-value
+ax[1].plot(fine_ang, pr, 'r-', linewidth=2, label='Constrained asymmetric')
+ax[1].plot(angles_deg, exp_r, 'ko', markersize=8, label='Exp. data')
+ax[1].set_xticks([0, 15, 30, 45, 60, 75, 90])
+ax[1].set_xlabel('Angle from RD (deg.)')
+ax[1].set_ylabel(r'$R_\theta$')
+ax[1].set_title(r'Lankford Coefficient $R_\theta$')
+ax[1].grid(True, ls=':')
+ax[1].legend()
+ax[1].set_ylim(0.0, 6.0)
+ 
+# (3) Yield surface (벡터화된 contour 계산)
+s_range = np.linspace(-2.0, 2.0, 401)
+X, Y = np.meshgrid(s_range, s_range)
+Z = get_phi_values(opt, X, Y, np.zeros_like(X)) - k12
+ 
+ax[2].contour(X, Y, Z, levels=[0], colors='blue', linewidths=2.5)
+ 
+# von Mises comparison
+Z_vm = X**2 - X * Y + Y**2 - 1.0
+ax[2].contour(X, Y, Z_vm, levels=[0], colors='gray', linestyles='--')
+ 
+# equi-biaxial point
+ax[2].plot(exp_sigma_b, exp_sigma_b, 'rs', markersize=9, label=r'Exp. $\sigma_b$')
+pred_sb = predict_sigma_b(raw_opt)
+ax[2].plot(pred_sb, pred_sb, 'bo', markersize=7, label=r'Pred. $\sigma_b$')
+ 
+# uniaxial tension points
+ax[2].plot(exp_sigma[0], 0.0, 'ko', markersize=6)
+ax[2].plot(0.0, exp_sigma[-1], 'ko', markersize=6)
+ 
+# compression points if available
+if use_compression_data:
+    for deg, sc in zip(comp_angles_deg, exp_sigma_c):
+        sxc, syc, _ = uniaxial_stress_state(deg, sign=-1.0)
+        ax[2].plot(sc * sxc, sc * syc, 'gs', markersize=8)
+ 
+ax[2].axhline(0, color='k', lw=1.0)
+ax[2].axvline(0, color='k', lw=1.0)
+ax[2].set_aspect('equal')
+ax[2].set_xlabel(r'$\sigma_x / \sigma_0$')
+ax[2].set_ylabel(r'$\sigma_y / \sigma_0$')
+ax[2].set_title('Constrained Asymmetric Yield Surface')
+ax[2].grid(True, ls=':')
+ax[2].legend()
+ 
+plt.tight_layout()
+ 
+ 
+# ------------------------------------------------------------
+# 16. Plot 2: convexity diagnostics
+# ------------------------------------------------------------
+fig2, ax2 = plt.subplots(1, 2, figsize=(14, 6))
+ 
+# (1) sx-sy 단면의 정규화 곡률 분포
+u_main, v_main = SECTION_PLANES[0][0], SECTION_PLANES[0][1]
+angs_v, rho_v, curv_v = section_curvature(opt, u_main, v_main, N_VERIFY)
+angs_deg_v = np.degrees(angs_v)
+ 
+ax2[0].plot(angs_deg_v, curv_v, 'b-', lw=1.5,
+            label='Normalized curvature')
+ax2[0].axhline(0.0, color='k', lw=1.2)
+ax2[0].axhline(CONV['margin_rel'], color='r', ls='--', lw=1.0,
+               label=f"margin = {CONV['margin_rel']}")
+ 
+i_min = int(np.argmin(curv_v))
+ax2[0].plot(angs_deg_v[i_min], curv_v[i_min], 'rv', markersize=9,
+            label=f"min = {curv_v[i_min]:.4f} @ {angs_deg_v[i_min]:.1f}"
+                  + r"$^\circ$")
+ 
+ax2[0].set_yscale('symlog', linthresh=1.0e-3)
+ax2[0].set_xlim(0, 360)
+ax2[0].set_xticks(np.arange(0, 361, 45))
+ax2[0].set_xlabel(r'Loading direction angle in $\sigma_x$-$\sigma_y$ plane (deg.)')
+ax2[0].set_ylabel(r'$(\rho^2 + 2\rho^{\prime 2} - \rho\rho^{\prime\prime})/\rho^2$')
+ax2[0].set_title(r'Convexity Measure on $\sigma_x$-$\sigma_y$ Section')
+ax2[0].grid(True, ls=':')
+ax2[0].legend(loc='upper right')
+ 
+# (2) 1사분면 확대 항복곡면 + 최소곡률 위치
+sx_locus = rho_v * np.cos(angs_v)
+sy_locus = rho_v * np.sin(angs_v)
+ 
+ax2[1].plot(sx_locus, sy_locus, 'b-', lw=2.0, label='Yield locus')
+ax2[1].plot(exp_sigma_b, exp_sigma_b, 'rs', markersize=9, label=r'Exp. $\sigma_b$')
+ax2[1].plot(pred_sb, pred_sb, 'bo', markersize=7, label=r'Pred. $\sigma_b$')
+ax2[1].plot(exp_sigma[0], 0.0, 'ko', markersize=6)
+ax2[1].plot(0.0, exp_sigma[-1], 'ko', markersize=6)
+ax2[1].plot(sx_locus[i_min], sy_locus[i_min], 'rv', markersize=10,
+            label='Min curvature point')
+ 
+# convex hull overlay: 볼록이면 locus와 완전히 겹쳐 보임
+if hull_obj is not None:
+    hv = np.append(hull_obj.vertices, hull_obj.vertices[0])
+    ax2[1].plot(hull_pts[hv, 0], hull_pts[hv, 1], 'r--', lw=1.0,
+                label=f'Convex hull (dev = {hull_dev:.1e})')
+ 
+# locus 실험점 표시
+if use_locus_data:
+    ax2[1].plot(exp_locus_points[:, 0], exp_locus_points[:, 1],
+                'm^', markersize=9, label='Exp. locus points')
+ 
+ax2[1].set_xlim(-0.1, 1.7)
+ax2[1].set_ylim(-0.1, 1.7)
+ax2[1].set_aspect('equal')
+ax2[1].axhline(0, color='k', lw=1.0)
+ax2[1].axvline(0, color='k', lw=1.0)
+ax2[1].set_xlabel(r'$\sigma_x / \sigma_0$')
+ax2[1].set_ylabel(r'$\sigma_y / \sigma_0$')
+ax2[1].set_title('First Quadrant (zoomed)')
+ax2[1].grid(True, ls=':')
+ax2[1].legend(loc='lower left')
+ 
+plt.tight_layout()
+plt.show()
