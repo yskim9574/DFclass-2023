@@ -10,7 +10,8 @@ from ultralytics import YOLO
 from google.colab import drive
 import cv2
 import matplotlib.pyplot as plt
-
+#YOLOv10: Real-Time End-to-End Object Detection
+#2024년 중국칭화대학 발표
 # ==================================================
 # 3. Google Drive 연결
 # ==================================================
