@@ -1,0 +1,92 @@
+# ==================================================
+# 1. 설치
+# ==================================================
+!pip install -q ultralytics
+
+# ==================================================
+# 2. 라이브러리
+# ==================================================
+from ultralytics import YOLO
+from google.colab import drive
+import cv2
+import matplotlib.pyplot as plt
+
+# ==================================================
+# 3. Google Drive 연결
+# ==================================================
+drive.mount("/content/drive")
+
+# ==================================================
+# 4. 이미지 경로
+# ==================================================
+image_path = (
+    "/content/drive/MyDrive/"
+    "object_detection/family_car.jpg"
+)
+
+# ==================================================
+# 5. YOLOv10 모델
+# ==================================================
+model = YOLO("yolov10n.pt")
+
+# ==================================================
+# 6. 추론
+# person=0, car=2
+# ==================================================
+results = model.predict(
+    source=image_path,
+    conf=0.30,
+    classes=[0, 2],
+    imgsz=640,
+    device=0,
+    verbose=False
+)
+
+result = results[0]
+
+# ==================================================
+# 7. 검출 결과 이미지
+# ==================================================
+annotated_bgr = result.plot()
+annotated_rgb = cv2.cvtColor(
+    annotated_bgr,
+    cv2.COLOR_BGR2RGB
+)
+
+plt.figure(figsize=(10, 10))
+plt.imshow(annotated_rgb)
+plt.axis("off")
+plt.show()
+
+# ==================================================
+# 8. 객체 개수와 위치 출력
+# ==================================================
+person_count = 0
+car_count = 0
+
+for box in result.boxes:
+
+    class_id = int(box.cls[0].item())
+    confidence = float(box.conf[0].item())
+    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+
+    if class_id == 0:
+        person_count += 1
+        class_name = "Person"
+
+    elif class_id == 2:
+        car_count += 1
+        class_name = "Car"
+
+    else:
+        continue
+
+    print(
+        f"{class_name}: "
+        f"confidence={confidence:.3f}, "
+        f"box=({x1:.1f}, {y1:.1f}, "
+        f"{x2:.1f}, {y2:.1f})"
+    )
+
+print("\n검출된 사람 수:", person_count)
+print("검출된 자동차 수:", car_count)
