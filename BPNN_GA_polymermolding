@@ -1,0 +1,190 @@
+#H.J.Kim (2026,6)
+import numpy as np
+from sklearn.neural_network import MLPRegressor
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import r2_score, mean_absolute_error
+# 1. 논문 Table 2 데이터 입력
+data = [
+ [35, 222.5, 4, 120, 3, 32.5, 2.208, 18.27],
+ [45, 200, 2, 160, 1, 20, 2.346, 17.02],
+ [35, 257.714, 4, 120, 3, 32.5, 1.796, 20.04],
+ [25, 245, 2, 80, 1, 20, 2.634, 19.77],
+ [25, 245, 6, 160, 1, 45, 2.091, 19.77],
+ [45, 200, 2, 160, 1, 45, 2.345, 17.09],
+ [45, 245, 2, 160, 1, 20, 2.777, 19.76],
+ [25, 245, 6, 80, 1, 45, 2.060, 19.77],
+ [45, 245, 2, 80, 5, 20, 2.437, 18.69],
+ [35, 222.5, 1.5, 120, 3, 32.5, 2.390, 18.24],
+ [35, 222.5, 4, 120, 3, 32.5, 2.208, 18.27],
+ [45, 200, 6, 160, 1, 45, 2.211, 17.10],
+ [25, 200, 2, 160, 5, 45, 2.555, 16.81],
+ [25, 200, 2, 160, 5, 20, 2.394, 16.83],
+ [25, 200, 6, 80, 1, 20, 2.319, 17.11],
+ [35, 222.5, 4, 120, 3, 32.5, 2.208, 18.27],
+ [45, 245, 6, 160, 1, 45, 2.438, 17.10],
+ [45, 200, 2, 80, 1, 45, 1.974, 19.76],
+ [35, 222.5, 4, 120, 3, 32.5, 2.208, 18.27],
+ [19.3492, 222.5, 4, 120, 3, 32.5, 2.341, 18.23],
+ [45, 200, 6, 160, 1, 20, 2.275, 17.11],
+ [45, 245, 2, 160, 5, 45, 1.881, 19.12],
+ [25, 200, 6, 80, 1, 45, 2.158, 17.10],
+ [45, 200, 6, 80, 1, 20, 2.210, 17.11],
+ [45, 200, 2, 80, 5, 20, 2.225, 16.43],
+ [35, 222.5, 4, 120, 3, 32.5, 2.208, 18.27],
+ [25, 200, 2, 160, 1, 45, 2.256, 17.09],
+ [35, 222.5, 4, 120, 3, 32.5, 2.208, 18.27],
+ [35, 222.5, 4, 120, 3, 32.5, 2.208, 18.27],
+ [25, 245, 2, 160, 1, 20, 2.636, 19.76],
+ [25, 245, 6, 160, 5, 20, 2.091, 19.77],
+ [25, 200, 6, 160, 1, 45, 2.290, 17.10],
+ [25, 200, 2, 80, 1, 20, 2.664, 17.11],
+ [35, 222.5, 4, 120, 3, 32.5, 2.208, 18.27],
+ [45, 245, 6, 160, 5, 20, 2.115, 18.86],
+ [45, 245, 6, 80, 1, 45, 2.055, 19.77],
+ [45, 245, 6, 160, 1, 20, 2.238, 19.76],
+ [35, 222.5, 7.13017, 120, 3, 32.5, 1.959, 18.25],
+ [25, 245, 2, 160, 5, 20, 2.099, 19.10],
+ [45, 200, 6, 80, 5, 20, 2.062, 16.44],
+ [25, 245, 2, 160, 5, 45, 2.033, 19.09],
+ [25, 245, 2, 80, 1, 45, 2.345, 19.77],
+ [45, 245, 2, 80, 1, 45, 2.367, 19.76],
+ [45, 200, 2, 160, 5, 45, 2.397, 16.85],
+ [45, 245, 6, 80, 1, 20, 2.395, 19.77],
+ [35, 187.286, 4, 120, 3, 32.5, 2.478, 16.28],
+ [45, 200, 2, 160, 5, 20, 2.277, 16.86],
+ [45, 200, 2, 80, 1, 20, 2.717, 17.11],
+ [45, 245, 2, 160, 5, 20, 2.405, 19.14],
+ [25, 200, 2, 160, 1, 20, 2.616, 17.10],
+ [25, 245, 2, 160, 1, 45, 2.296, 19.76],
+ [25, 200, 2, 80, 1, 45, 2.397, 17.10],
+ [45, 245, 2, 80, 1, 20, 2.716, 19.76],
+ [25, 200, 2, 80, 5, 45, 2.523, 16.07],
+ [35, 222.5, 4, 120, 3, 52.0636, 2.321, 18.24],
+ [25, 245, 6, 80, 1, 20, 1.957, 19.77],
+ [45, 200, 2, 80, 5, 45, 2.388, 16.61],
+ [25, 245, 2, 80, 5, 20, 2.458, 18.69],
+ [45, 200, 6, 80, 1, 45, 2.314, 17.10],
+ [35, 222.5, 4, 182.603, 3, 32.5, 2.186, 18.24],
+ [25, 245, 6, 160, 1, 20, 1.833, 19.77],
+ [35, 222.5, 4, 120, 3, 32.5, 2.223, 18.25],
+ [25, 245, 6, 160, 5, 45, 1.880, 18.82],
+ [35, 222.5, 4, 120, 6.13017, 32.5, 2.161, 17.53],
+ [25, 200, 6, 160, 1, 20, 2.221, 17.11],
+ [35, 222.5, 4, 57.3966, 3, 32.5, 2.223, 18.25],
+ [25, 200, 2, 80, 5, 20, 2.394, 16.37],
+ [45, 245, 2, 160, 1, 45, 2.330, 19.78],
+ [35, 222.5, 4, 120, 3, 32.5, 2.208, 18.27],
+]
+arr = np.array(data, dtype=float)
+X = arr[:, 0:6] # 입력: 사출조건 6개
+y = arr[:, 6:8] # 출력: warpage, shrinkage
+# 2. BPNN 모델 학습
+x_scaler = MinMaxScaler()
+y_scaler = MinMaxScaler()
+X_scaled = x_scaler.fit_transform(X)
+y_scaled = y_scaler.fit_transform(y)
+bpnn = MLPRegressor(
+ hidden_layer_sizes=(12, 8),
+ activation="tanh",
+ solver="lbfgs",
+ max_iter=20000,
+ random_state=7
+)
+bpnn.fit(X_scaled, y_scaled)
+def predict_by_bpnn(x_input):
+ x_input = np.asarray(x_input, dtype=float)
+ if x_input.ndim == 1:
+  x_input = x_input.reshape(1, -1)
+ x_input_scaled = x_scaler.transform(x_input)
+ y_pred_scaled = bpnn.predict(x_input_scaled)
+ y_pred = y_scaler.inverse_transform(y_pred_scaled)
+ return y_pred
+train_pred = predict_by_bpnn(X)
+print("========== BPNN 학습 확인 ==========")
+print("R2 [warpage, shrinkage] =", r2_score(y, train_pred, multioutput="raw_values"))
+print("MAE [warpage, shrinkage] =", mean_absolute_error(y, train_pred, multioutput="raw_values"))
+print()
+# 3. 목적함수 설정
+y_min = y.min(axis=0)
+y_max = y.max(axis=0)
+def objective(population):
+ pred = predict_by_bpnn(population)
+ warpage = pred[:, 0]
+ shrinkage = pred[:, 1]
+ warpage_norm = (warpage - y_min[0]) / (y_max[0] - y_min[0])
+ shrinkage_norm = (shrinkage - y_min[1]) / (y_max[1] - y_min[1])
+ return warpage_norm + shrinkage_norm
+# 4. GA 설정
+bounds = np.array([
+ [25, 45],
+ [200, 240],
+ [1, 6],
+ [80, 160],
+ [1, 5],
+ [20, 40],
+], dtype=float)
+def run_ga(seed=42, n_population=100, n_generation=200, n_elite=10):
+ rng = np.random.default_rng(seed)
+ n_var = bounds.shape[0]
+ lower = bounds[:, 0]
+ upper = bounds[:, 1]
+ population = lower + rng.random((n_population, n_var)) * (upper - lower)
+ for gen in range(n_generation):
+  score = objective(population)
+  order = np.argsort(score)
+  population = population[order]
+  score = score[order]
+  new_population = np.empty_like(population)
+  new_population[:n_elite] = population[:n_elite]
+  for i in range(n_elite, n_population):
+   cand1 = rng.integers(0, n_population, size=3)
+   parent1 = population[cand1[np.argmin(score[cand1])]]
+   cand2 = rng.integers(0, n_population, size=3)
+   parent2 = population[cand2[np.argmin(score[cand2])]]
+   alpha = rng.random(n_var)
+   child = alpha * parent1 + (1 - alpha) * parent2
+   mutation = rng.normal(0, 0.015 * (upper - lower), size=n_var)
+   child = child + mutation
+   if rng.random() < 0.2:
+    j = rng.integers(0, n_var)
+    child[ j] = lower[ j] + rng.random() * (upper[ j] - lower[ j])
+   # 범위 제한
+   child = np.clip(child, lower, upper)
+   new_population[i] = child
+  population = new_population
+ final_score = objective(population)
+ best_index = np.argmin(final_score)
+ best_x = population[best_index]
+ best_y = predict_by_bpnn(best_x)[0]
+ best_score = final_score[best_index]
+ return best_x, best_y, best_score
+# 5. GA-BPNN 최적화 실행
+best_x, best_y, best_score = run_ga()
+print("========== GA-BPNN 최적화 결과 ==========")
+print("Mold temperature = %.4f degC" % best_x[0])
+print("Melt temperature = %.4f degC" % best_x[1])
+print("Holding time = %.4f s" % best_x[2])
+print("Holding pressure = %.4f MPa" % best_x[3])
+print("Injection time = %.4f s" % best_x[4])
+print("Cooling time = %.4f s" % best_x[5])
+print("Predicted warpage = %.4f mm" % best_y[0])
+print("Predicted shrinkage = %.4f %%" % best_y[1])
+print("Objective score = %.4f" % best_score)
+print()
+# 6. 참고: Table 2 안에서만 고른 최선 조건
+warpage_norm_table = (arr[:, 6] - y_min[0]) / (y_max[0] - y_min[0])
+shrinkage_norm_table = (arr[:, 7] - y_min[1]) / (y_max[1] - y_min[1])
+table_score = warpage_norm_table + shrinkage_norm_table
+best_table_index = np.argmin(table_score)
+best_table_row = arr[best_table_index]
+print("========== Table 2 내부에서만 고른 최선 조건 ==========")
+print("Program number =", best_table_index + 1)
+print("Mold temperature = %.4f degC" % best_table_row[0])
+print("Melt temperature = %.4f degC" % best_table_row[1])
+print("Holding time = %.4f s" % best_table_row[2])
+print("Holding pressure = %.4f MPa" % best_table_row[3])
+print("Injection time = %.4f s" % best_table_row[4])
+print("Cooling time = %.4f s" % best_table_row[5])
+print("Warpage = %.4f mm" % best_table_row[6])
+print("Shrinkage = %.4f %%" % best_table_row[7])
+print("Objective score = %.4f" % table_score[best_table_index])
