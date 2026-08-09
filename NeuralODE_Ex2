@@ -1,0 +1,138 @@
+!pip install torch torchdiffeq matplotlib
+
+import torch
+import torch
+import torch.nn as nn
+import matplotlib.pyplot as plt
+from torchdiffeq import odeint
+
+torch.manual_seed(0)
+
+# --------------------------------
+# 1. 학습 데이터
+# --------------------------------
+t = torch.linspace(
+    0.0,
+    6.0,
+    100
+)
+
+x_true = torch.cos(2*t)
+v_true = -2*torch.sin(2*t)
+
+z_true = torch.stack(
+    [x_true, v_true],
+    dim=1
+)
+
+z0 = torch.tensor(
+    [1.0, 0.0]
+)
+
+# --------------------------------
+# 2. Neural ODE
+# --------------------------------
+class OscillatorODE(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+        self.net = nn.Sequential(
+            nn.Linear(2, 32),
+            nn.Tanh(),
+            nn.Linear(32, 32),
+            nn.Tanh(),
+            nn.Linear(32, 2)
+        )
+
+    def forward(self, t, z):
+
+        return self.net(z)
+
+
+func = OscillatorODE()
+
+optimizer = torch.optim.Adam(
+    func.parameters(),
+    lr=0.005
+)
+
+# --------------------------------
+# 3. 학습
+# --------------------------------
+for epoch in range(1000):
+
+    optimizer.zero_grad()
+
+    z_pred = odeint(
+        func,
+        z0,
+        t,
+        method='dopri5'
+    )
+
+    loss = torch.mean(
+        (z_pred - z_true)**2
+    )
+
+    loss.backward()
+
+    optimizer.step()
+
+    if epoch % 200 == 0:
+        print(
+            epoch,
+            loss.item()
+        )
+
+# --------------------------------
+# 4. 결과
+# --------------------------------
+with torch.no_grad():
+
+    z_pred = odeint(
+        func,
+        z0,
+        t
+    )
+
+x_pred = z_pred[:, 0]
+v_pred = z_pred[:, 1]
+
+plt.plot(
+    t.numpy(),
+    x_true.numpy(),
+    label='Exact x(t)'
+)
+
+plt.plot(
+    t.numpy(),
+    x_pred.numpy(),
+    '--',
+    label='Neural ODE'
+)
+
+plt.xlabel('Time')
+plt.ylabel('Displacement')
+plt.legend()
+plt.grid()
+plt.show()
+plt.plot(
+    x_true.numpy(),
+    v_true.numpy(),
+    label='Exact'
+)
+
+plt.plot(
+    x_pred.numpy(),
+    v_pred.numpy(),
+    '--',
+    label='Neural ODE'
+)
+
+plt.xlabel('Displacement x')
+plt.ylabel('Velocity v')
+plt.legend()
+plt.axis('equal')
+plt.grid()
+plt.show()
