@@ -1,0 +1,119 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 1. 람버그-오스굿(Ramberg-Osgood) 방정식 정의
+def r_o_virgin(sigma, E, K, n):
+    """최초 하중 부가 시 (Virgin Curve)"""
+    return sigma / E + np.sign(sigma) * (abs(sigma) / K)**(1/n)
+
+def r_o_branch(sigma, sig_r, eps_r, E, K, n):
+    """방향 전환 후 히스테리시스 곡선 (Masing's Rule)"""
+    return eps_r + (sigma - sig_r) / E + 2 * np.sign(sigma - sig_r) * (abs(sigma - sig_r) / (2 * K))**(1/n)
+
+# 2. 응력 이력 데이터 (오타 수정 반영: 시간 순서 1~16)
+stress_history = [0, -150, 100, 0, 130, -120, 110, -50, 80, 0, 150, -100, 100, 0, 130, 0]
+
+# 3. 재료 물성치 (Ramberg-Osgood Parameters)
+E = 200000.0   # 탄성계수 (MPa)
+K = 350.0      # 반복 강도 계수 (Cyclic Strength Coefficient, MPa) - 낮을수록 루프가 뚱뚱해짐
+n = 0.15       # 반복 변형률 경화 지수 (Cyclic Strain Hardening Exponent) - 곡선의 휨 정도 결정
+
+# 4. 시뮬레이션 변수 초기화
+sigma_plot = []
+epsilon_plot = []
+peak_valley_eps = []
+peak_valley_sig = []
+
+# 재료의 "기억(Memory)"을 저장하는 스택 (Rainflow 카운팅의 핵심 원리)
+memory_stack = [(0.0, 0.0)] 
+current_sig = 0.0
+
+# 5. 하중 이력 시뮬레이션 (Rainflow Memory 알고리즘 적용)
+for target_sig in stress_history[1:]:
+    steps = np.linspace(current_sig, target_sig, 100) # 부드러운 선을 위해 잘게 쪼갬
+    
+    for s in steps[1:]:
+        # (1) 내부 루프가 닫히는지(Memory Effect) 확인
+        if len(memory_stack) >= 3:
+            sig_prev_rev = memory_stack[-1][0]
+            sig_prev_prev_rev = memory_stack[-2][0]
+            
+            # 현재 응력이 이전 루프의 시작점을 통과하면 (루프 닫힘)
+            if (sig_prev_rev < sig_prev_prev_rev and s >= sig_prev_prev_rev) or \
+               (sig_prev_rev > sig_prev_prev_rev and s <= sig_prev_prev_rev):
+                # 닫힌 작은 루프의 기억을 삭제하고 이전의 큰 궤적으로 복귀!
+                memory_stack.pop()
+                memory_stack.pop()
+        
+        # (2) 현재 스택 상태에 따라 변형률 계산
+        if len(memory_stack) == 1:
+            # 스택에 시작점만 있으면 Virgin 곡선 따라감
+            e = r_o_virgin(s, E, K, n)
+        else:
+            # 그렇지 않으면 마지막 반전점(Reversal)을 기준으로 Branch 곡선 따라감
+            sig_r, eps_r = memory_stack[-1]
+            e = r_o_branch(s, sig_r, eps_r, E, K, n)
+            
+        sigma_plot.append(s)
+        epsilon_plot.append(e)
+        
+    # 목표 응력 도달 시: 현재 지점을 반전점(Reversal)으로 스택과 리스트에 저장
+    memory_stack.append((target_sig, e))
+    peak_valley_eps.append(e)
+    peak_valley_sig.append(target_sig)
+    current_sig = target_sig
+
+# (시작점 좌표 추가)
+peak_valley_eps.insert(0, 0.0)
+peak_valley_sig.insert(0, 0.0)
+
+# ==========================================
+# 6. 번호 겹침 처리 로직 (이전과 동일)
+# ==========================================
+coord_dict = {}
+for i, (eps, sig) in enumerate(zip(peak_valley_eps, peak_valley_sig)):
+    key = (round(eps, 4), round(sig, 1))
+    if key in coord_dict:
+        coord_dict[key].append(str(i + 1))
+    else:
+        coord_dict[key] = [str(i + 1)]
+
+# 7. 시각화 (교재 삽화용 고품질 그래프)
+plt.figure(figsize=(6, 6))
+
+# 궤적 그리기 (부드러운 곡선)
+plt.plot(epsilon_plot, sigma_plot, color='royalblue', linewidth=1.5, label='Ramberg-Osgood Hysteresis')
+plt.scatter(peak_valley_eps, peak_valley_sig, color='red', zorder=5, s=50, label='Reversal Points')
+
+# 번호 라벨링
+for (eps, sig), labels in coord_dict.items():
+    label_text = " & ".join(labels) 
+    
+    if sig > 0:
+        xytext = (0, 12); va = 'bottom'; ha = 'center'
+    elif sig < 0:
+        xytext = (0, -12); va = 'top'; ha = 'center'
+    else:
+        xytext = (12, 0); va = 'center'; ha = 'left'
+        
+    plt.annotate(
+        label_text, (eps, sig),
+        textcoords="offset points", xytext=xytext,
+        ha=ha, va=va, fontsize=12, fontweight='bold', color='darkred',
+        bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85)
+    )
+
+# x축, y축 강조
+plt.axhline(0, color='black', linewidth=1.0, alpha=0.5)
+plt.axvline(0, color='black', linewidth=1.0, alpha=0.5)
+
+plt.grid(True, linestyle=':', alpha=0.8)
+plt.xlabel('Strain ($\epsilon$)', fontsize=14)
+plt.ylabel('Stress ($\sigma$) [MPa]', fontsize=14)
+plt.title(f'Continuous Hysteresis Loops (Ramberg-Osgood Model)\n$E = {E/1000}$ GPa, $K\' = {K}$ MPa, $n\' = {n}$', fontsize=16)
+
+plt.margins(0.15)
+plt.legend(fontsize=12, loc='upper left')
+
+plt.tight_layout()
+plt.show()
