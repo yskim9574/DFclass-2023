@@ -1,0 +1,59 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import fsolve, curve_fit
+
+# 1. 데이터 정의
+delta_a = np.array([0, 0.014, 0.0255, 0.043, 0.0915, 0.30, 0.42, 0.75, 1.00, 1.25, 1.38, 1.85])
+J = np.array([0,8.524,24.979,40.287,89.907,194.902,230.328,307.891,345.354,401.420,429.868,507.099])
+
+# 2. 멱함수 커브 피팅 파라미터 (이전 계산 결과)
+C1 = 348.7079
+C2 = 0.5771
+
+# 부드러운 곡선 생성을 위한 x 범위
+da_smooth = np.linspace(0.001, 1.85, 300)
+J_fitted = C1 * (da_smooth ** C2)
+
+# 3. 참조 직선 정의
+line1 = 920 * da_smooth
+line2 = 920 * (da_smooth - 0.2)
+
+# 4. 커브 피팅 곡선과 참조 직선 2의 교점(J_Q) 계산
+def intersection_func(da):
+    return C1 * (da ** C2) - 920 * (da - 0.2)
+
+da_Q = fsolve(intersection_func, 0.4)[0]
+J_Q = 920 * (da_Q - 0.2)
+
+print(f"J_Q 교점 좌표: delta_a = {da_Q:.4f} mm, J_Q = {J_Q:.4f} kJ/m^2")
+
+# 5. 그래프 시각화
+plt.figure(figsize=(7,5))
+
+# 실험 데이터 (점선)
+plt.plot(delta_a, J, 'ko--', label='Experimental Data ($J$ vs $\Delta a$)', markersize=6, alpha=0.8)
+
+# 커브 피팅 곡선 (실선)
+plt.plot(da_smooth, J_fitted, 'r-', linewidth=2, label=f'Power Fit: $J = {C1:.2f} \cdot \Delta a^{{{C2:.2f}}}$')
+
+# 참조 직선들
+plt.plot(da_smooth, line1, 'b--', label='$J = 920 \cdot \Delta a$')
+plt.plot(da_smooth, line2, 'g-.', label='$J = 920 \cdot (\Delta a - 0.2)$')
+
+# 교점(J_Q) 표시
+plt.plot(da_Q, J_Q, 'ro', markersize=8, zorder=5)
+plt.annotate(f'$J_Q$ ({da_Q:.3f}, {J_Q:.2f})', 
+             xy=(da_Q, J_Q), xytext=(da_Q + 0.1, J_Q - 40),
+             arrowprops=dict(facecolor='black', arrowstyle='->', lw=1),
+             fontsize=11, fontweight='bold')
+
+plt.xlim(0, 1.9)
+plt.ylim(0, 600)
+plt.xlabel('Crack Extension $\Delta a$ (mm)', fontsize=12)
+plt.ylabel('$J$ ($\mathrm{kJ/m^2}$)', fontsize=12)
+plt.title('$J - \Delta a$ Resistance Curve & Intersection $J_Q$', fontsize=14)
+plt.legend(loc='lower right', fontsize=10)
+plt.grid(True, linestyle=':', alpha=0.7)
+
+plt.tight_layout()
+plt.show()
