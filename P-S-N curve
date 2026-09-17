@@ -1,0 +1,250 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+
+# ============================================================
+# 1. 피로시험 데이터
+# ============================================================
+
+specimen = np.arange(1, 25)
+
+# 모든 시험의 하중비는 R = 0.05
+R = np.full(24, 0.05)
+
+# 응력진폭 [MPa]
+S = np.array([
+    225, 350, 310, 280, 350, 250,
+    310, 250, 250, 310, 280, 350,
+    225, 350, 280, 250, 225, 280,
+    310, 250, 225, 225, 200, 200
+], dtype=float)
+
+# 피로수명 [cycles]
+N = np.array([
+    1338100, 23500, 63300, 245300,
+    90300, 105100, 126600, 180400,
+    368900, 109500, 209500, 70000,
+    1013500, 79800, 158000, 227600,
+    780800, 408900, 127700,
+    5000000, 5000000, 5000000,
+    5000000, 5000000
+], dtype=float)
+
+# ============================================================
+# 2. Run-out 자료 지정
+# ============================================================
+# 20~24번 시험편은 5,000,000회까지 파단되지 않은 자료로 가정
+runout = np.zeros(len(N), dtype=bool)
+runout[19:24] = True
+
+# 실제 파단자료만 회귀분석에 사용
+N_fail = N[~runout]
+S_fail = S[~runout]
+
+q_exp = len(N_fail)
+
+# ============================================================
+# 3. 로그 변환 및 Basquin 회귀분석
+#
+#    log10(S) = a + b log10(N)
+#
+#    b = -1/m
+#    a = (1/m) log10(C)
+# ============================================================
+
+logN = np.log10(N_fail)
+logS = np.log10(S_fail)
+
+# 1차 최소제곱 회귀
+b, a = np.polyfit(logN, logS, 1)
+
+# Basquin 지수
+m = -1.0 / b
+
+# S = A*N^b에서의 A
+A = 10**a
+
+# S = (C/N)^(1/m)에서의 C
+logC_mean = m * a
+C_mean = 10**logC_mean
+
+# ============================================================
+# 4. 각 시험편의 log(C_i)와 표본표준편차
+#
+#    log(C_i) = m log(S_i) + log(N_i)
+# ============================================================
+
+logC_i = m * logS + logN
+
+# 표본평균
+mean_logC = np.mean(logC_i)
+
+# 표본표준편차: 분모 q_exp - 1
+S_logC = np.std(logC_i, ddof=1)
+
+# ============================================================
+# 5. 확률별 S-N 곡선 계산
+# ============================================================
+
+probabilities = [0.05, 0.50, 0.95]
+
+# 표준정규분포 분위수
+z_values = {
+    pf: norm.ppf(pf)
+    for pf in probabilities
+}
+
+# 도시할 수명 범위
+N_curve = np.logspace(4, np.log10(5.0e6), 500)
+
+def stress_curve(N_value, pf):
+    """
+    파괴확률 pf에 대응하는 S-N 곡선
+    """
+    z = norm.ppf(pf)
+
+    logC_pf = mean_logC + z * S_logC
+
+    return 10**(
+        (logC_pf - np.log10(N_value)) / m
+    )
+
+S_pf05 = stress_curve(N_curve, 0.05)
+S_mean = stress_curve(N_curve, 0.50)
+S_pf95 = stress_curve(N_curve, 0.95)
+
+# ============================================================
+# 6. 계산 결과 출력
+# ============================================================
+
+print("=" * 60)
+print("Basquin S-N curve fitting results")
+print("=" * 60)
+
+print(f"Number of failed specimens q_exp = {q_exp}")
+print(f"Number of run-outs              = {np.sum(runout)}")
+print()
+
+print("Regression equation")
+print(f"log10(S) = {a:.6f} {b:+.6f} log10(N)")
+print()
+
+print("Basquin equation")
+print(f"S = {A:.4f} N^({b:.6f})")
+print()
+
+print("Alternative Basquin equation")
+print(f"S = (C/N)^(1/m)")
+print(f"m              = {m:.6f}")
+print(f"mean log10(C)  = {mean_logC:.6f}")
+print(f"C              = {10**mean_logC:.6e}")
+print()
+
+print("Fatigue-data scatter")
+print(f"S_logC         = {S_logC:.6f}")
+print()
+
+for pf in probabilities:
+    z = z_values[pf]
+    logC_pf = mean_logC + z * S_logC
+    C_pf = 10**logC_pf
+
+    print(
+        f"pf = {pf:4.2f}: "
+        f"z = {z:8.4f}, "
+        f"log10(C_pf) = {logC_pf:10.6f}, "
+        f"C_pf = {C_pf:.6e}"
+    )
+
+# ============================================================
+# 7. S-N 선도 작성
+# ============================================================
+
+plt.figure(figsize=(6, 5.5))
+
+# 실제 파단자료
+plt.scatter(
+    N_fail,
+    S_fail,
+    marker="x",
+    s=65,
+    linewidth=1.8,
+    color="black",
+    label="Failed specimens"
+)
+
+# Run-out 자료
+plt.scatter(
+    N[runout],
+    S[runout],
+    marker=">",
+    s=75,
+    facecolors="none",
+    edgecolors="black",
+    linewidth=1.5,
+    label="Run-outs"
+)
+
+# 평균 S-N 곡선
+plt.plot(
+    N_curve,
+    S_mean,
+    color="black",
+    linewidth=2.2,
+    label=r"Mean curve ($p_f=50\%$)"
+)
+
+# pf = 5%
+plt.plot(
+    N_curve,
+    S_pf05,
+    color="blue",
+    linestyle="--",
+    linewidth=2.0,
+    label=r"$p_f=5\%$"
+)
+
+# pf = 95%
+plt.plot(
+    N_curve,
+    S_pf95,
+    color="red",
+    linestyle="-.",
+    linewidth=2.0,
+    label=r"$p_f=95\%$"
+)
+
+# 5%~95% 확률범위 음영
+plt.fill_between(
+    N_curve,
+    S_pf05,
+    S_pf95,
+    color="lightcoral",
+    alpha=0.20,
+    label=r"$5\%\leq p_f\leq95\%$"
+)
+
+# 로그 수명축
+plt.xscale("log")
+
+plt.xlim(1.0e4, 6.0e6)
+plt.ylim(150, 500)
+
+plt.xlabel("Cycles to failure, $N$", fontsize=13)
+plt.ylabel("Stress amplitude, $S$ [MPa]", fontsize=13)
+plt.title(
+    r"Probabilistic $S$-$N$ curves at $R=0.05$",
+    fontsize=14
+)
+
+plt.grid(
+    True,
+    which="both",
+    linestyle=":",
+    linewidth=0.7,
+    alpha=0.8
+)
+
+plt.legend(fontsize=10)
+plt.tight_layout()
+plt.show()
