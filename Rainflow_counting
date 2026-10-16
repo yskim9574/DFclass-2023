@@ -79,7 +79,7 @@ for i, (eps, sig) in enumerate(zip(peak_valley_eps, peak_valley_sig)):
         coord_dict[key] = [str(i + 1)]
 
 # 7. 시각화 (교재 삽화용 고품질 그래프)
-plt.figure(figsize=(6, 6))
+plt.figure(figsize=(7,7))
 
 # 궤적 그리기 (부드러운 곡선)
 plt.plot(epsilon_plot, sigma_plot, color='royalblue', linewidth=1.5, label='Ramberg-Osgood Hysteresis')
@@ -98,8 +98,8 @@ for (eps, sig), labels in coord_dict.items():
         
     plt.annotate(
         label_text, (eps, sig),
-        textcoords="offset points", xytext=xytext,
-        ha=ha, va=va, fontsize=12, fontweight='bold', color='darkred',
+        #textcoords="offset points", xytext=xytext,
+        #ha=ha, va=va, fontsize=12, fontweight='bold', color='darkred',
         bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85)
     )
 
@@ -114,6 +114,12 @@ plt.title(f'Continuous Hysteresis Loops (Ramberg-Osgood Model)\n$E = {E/1000}$ G
 
 plt.margins(0.15)
 plt.legend(fontsize=12, loc='upper left')
+plt.tick_params(axis='both', labelsize=14)
+
+plt.margins(0.15)
+plt.legend(fontsize=12, loc='upper left')
 
 plt.tight_layout()
+plt.savefig('hysteresis.png', dpi=300, bbox_inches='tight')
+
 plt.show()
