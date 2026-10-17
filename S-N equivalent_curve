@@ -1,0 +1,86 @@
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.ticker import ScalarFormatter, NullFormatter
+
+OUT = Path('/content')   # Colab working folder
+
+# 75S-T6 (7075-T6) sheet, axial-load fatigue: H.J. Grover, S.M. Bishop, L.R. Jackson,
+# NACA TN 2324 (1951), Table 3. Only specimens "Failed in critical section" are included.
+# Columns: R = sigma_min/sigma_max, sigma_max [MPa], sigma_min [MPa], sigma_a [MPa], N_f [cycles]
+DATA = [
+    (+0.60, 555.0,  333.0, 111.0,   14500), (+0.60, 555.0,  333.0, 111.0,   71700), (+0.60, 555.0,  333.0, 111.0,   68300),
+    (+0.60, 555.0,  333.0, 111.0,   99000), (+0.60, 517.1,  310.3, 103.4,   58600), (+0.60, 482.6,  289.6,  96.5,  432900),
+    (+0.50, 448.2,  224.1, 112.0,   89000), (+0.40, 555.0,  222.0, 166.5,   23600), (+0.40, 555.0,  222.0, 166.5,   23200),
+    (+0.40, 555.0,  222.0, 166.5,   20000), (+0.40, 555.0,  222.0, 166.5,   24000), (+0.40, 537.8,  215.1, 161.3,   27600),
+    (+0.40, 517.1,  206.8, 155.1,   37500), (+0.40, 482.6,  193.1, 144.8,   39100), (+0.40, 448.2,  179.3, 134.4,   63800),
+    (+0.40, 413.7,  165.5, 124.1,   99200), (+0.40, 386.1,  154.4, 115.8,  214200), (+0.40, 344.7,  137.9, 103.4,  173200),
+    (+0.25, 430.9,  107.7, 161.6,   52400), (+0.25, 379.2,   94.8, 142.2,  120800), (+0.10, 344.7,   34.5, 155.1,  178000),
+    (+0.10, 327.5,   32.8, 147.4,  892500), (+0.02, 555.0,   11.1, 272.0,    9400), (+0.02, 555.0,   11.1, 272.0,    9200),
+    (+0.02, 555.0,   11.1, 272.0,    9800), (+0.02, 551.6,   11.0, 270.3,    9700), (+0.02, 537.8,   10.8, 263.5,    9700),
+    (+0.02, 517.1,   10.3, 253.4,   16200), (+0.02, 482.6,    9.7, 236.5,   18800), (+0.02, 344.7,    6.9, 168.9,   48000),
+    (+0.02, 310.3,    6.2, 152.0,   99400), (+0.02, 310.3,    6.2, 152.0,  160600), (+0.02, 275.8,    5.5, 135.1,  355600),
+    (+0.02, 275.8,    5.5, 135.1, 9705800), (-0.60, 517.1, -310.3, 413.7,   11600), (-0.60, 517.1, -310.3, 413.7,    8800),
+    (-0.60, 517.1, -310.3, 413.7,    9400), (-0.60, 448.2, -268.9, 358.5,   11000), (-0.60, 413.7, -248.2, 330.9,   16600),
+    (-0.60, 413.7, -248.2, 330.9,   19100), (-0.60, 413.7, -248.2, 330.9,   19400), (-0.60, 379.2, -227.5, 303.4,   24600),
+    (-0.60, 296.5, -177.9, 237.2,   63800), (-0.60, 275.8, -165.5, 220.6,  152800), (-0.60, 275.8, -165.5, 220.6,  168700),
+    (-0.60, 258.6, -155.1, 206.8,  254800), (-0.80, 344.7, -275.8, 310.3,   15300), (-0.80, 272.3, -217.9, 245.1,   58100),
+    (-0.80, 241.3, -193.1, 217.2,  154700), (-1.00, 344.7, -344.7, 344.7,   13000), (-1.00, 275.8, -275.8, 275.8,   55400),
+    (-1.00, 275.8, -275.8, 275.8,   66800), (-1.00, 241.3, -241.3, 241.3,  110600), (-1.00, 206.8, -206.8, 206.8,  263000),
+    (-1.00, 206.8, -206.8, 206.8,  478000), (-1.00, 206.8, -206.8, 206.8, 3137000), (-1.00, 189.6, -189.6, 189.6, 1205000),
+    (-1.00, 172.4, -172.4, 172.4, 9497600),
+]
+
+SIGMA_U = 568.8   # tensile strength: 82,500 psi (NACA TN 2324, Table 1)
+GAMMA = 0.39      # Walker exponent
+
+df = pd.DataFrame(DATA, columns=['R', 'sigma_max', 'sigma_min', 'sigma_a', 'N_f'])
+df['sigma_m'] = (df.sigma_max + df.sigma_min) / 2
+df.to_csv(OUT / 'input_data.csv', index=False)
+assert (df.sigma_m < SIGMA_U).all()
+df['Goodman'] = df.sigma_a / (1 - df.sigma_m / SIGMA_U)
+df['Walker'] = df.sigma_max**(1 - GAMMA) * df.sigma_a**GAMMA
+df.to_csv(OUT / 'equivalent_stress_data.csv', index=False)
+
+colors = ['#0072B2', '#888888', '#D55E00', '#AA4499', '#009E73', '#CC79A7', '#E69F00', '#44AACC', '#332288']
+markers = ['o', 's', '^', 'D', 'v', 'P', 'X', '<', '>']
+rvals = sorted(df.R.unique(), reverse=True)
+plt.rcParams.update({'font.size': 14, 'axes.labelsize': 19, 'xtick.labelsize': 15, 'ytick.labelsize': 15,
+                     'axes.linewidth': 1.2, 'pdf.fonttype': 42})
+
+for method in ['Goodman', 'Walker']:
+    fig, ax = plt.subplots(figsize=(10, 7.2))
+    fig.subplots_adjust(left=.14, right=.78, bottom=.14, top=.87)
+    for r, c, m in zip(rvals, colors, markers):
+        g = df[df.R == r]
+        ax.scatter(g.N_f, g[method], s=65, marker=m, facecolors='none', edgecolors=c,
+                   linewidths=1.6, label=f'R = {r:.2f}', zorder=3)
+    ax.set_xscale('log'); ax.set_yscale('log')
+    ax.set_xlim(5e3, 2e7); ax.set_ylim(120, 650)
+    ax.set_xticks([1e4, 1e5, 1e6, 1e7]); ax.set_yticks([120, 150, 200, 300, 400, 500, 600])
+    ax.yaxis.set_major_formatter(ScalarFormatter()); ax.yaxis.set_minor_formatter(NullFormatter())
+    ax.set_xlabel(r'Cycles to failure, $N_f$ (cycles)')
+    ax.set_ylabel(r'Equivalent stress amplitude, $\sigma_{a,eq}$ (MPa)')
+    title = '7075-T6 aluminum sheet — ' + method + ' correction'
+    note = (rf'Tensile strength: $\sigma_u={SIGMA_U:g}$ MPa' if method == 'Goodman'
+            else rf'$\gamma={GAMMA}$; $\sigma_{{a,eq}}=\sigma_{{\max}}^{{1-\gamma}}\sigma_a^\gamma$')
+    ax.set_title(title + '\n' + note, fontsize=16, pad=12)
+    ax.grid(which='major', alpha=.25); ax.grid(which='minor', alpha=.12, ls=':')
+    ax.tick_params(which='both', direction='in', top=True, right=True)
+    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=12, frameon=False)
+    for ext in ['png', 'pdf', 'svg']:
+        fig.savefig(OUT / f'7075T6_{method}_equivalent_SN.{ext}', dpi=300)
+    plt.show()          # show the figure in Colab
+
+print(df.groupby('R')[['Goodman', 'Walker']].agg(['min', 'max']).round(2))
+
+# Download all result files as one zip (optional)
+import shutil
+from google.colab import files
+res = OUT / 'results'
+res.mkdir(exist_ok=True)
+for f in OUT.glob('7075T6_*'): shutil.copy(f, res)
+for f in ['input_data.csv', 'equivalent_stress_data.csv']: shutil.copy(OUT / f, res)
+shutil.make_archive(str(OUT / '7075T6_results'), 'zip', res)
+files.download(str(OUT / '7075T6_results.zip'))
