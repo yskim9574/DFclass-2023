@@ -1,0 +1,200 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from io import StringIO
+from matplotlib.ticker import LogLocator, NullFormatter, ScalarFormatter
+# ==========================================================
+# 1. 시험 데이터
+# 열 순서: R, sigma_max, sigma_min, sigma_a, sigma_m, N_f
+# 응력 단위: MPa, 수명 단위: cycles
+# ==========================================================
+data = """
+0.60 555.0 333.0 111.0 444.0 14500
+0.60 555.0 333.0 111.0 444.0 71700
+0.60 555.0 333.0 111.0 444.0 68300
+0.60 555.0 333.0 111.0 444.0 99000
+0.60 517.1 310.3 103.4 413.7 58600
+0.60 482.6 289.6 96.5 386.1 432900
+0.50 448.2 224.1 112.0 336.1 89000
+0.40 555.0 222.0 166.5 388.5 23600
+0.40 555.0 222.0 166.5 388.5 23200
+0.40 555.0 222.0 166.5 388.5 20000
+0.40 555.0 222.0 166.5 388.5 24000
+0.40 537.8 215.1 161.3 376.5 27600
+0.40 517.1 206.8 155.1 362.0 37500
+0.40 482.6 193.1 144.8 337.8 39100
+0.40 448.2 179.3 134.4 313.7 63800
+0.40 413.7 165.5 124.1 289.6 99200
+0.40 386.1 154.4 115.8 270.3 214200
+0.40 344.7 137.9 103.4 241.3 173200
+0.25 430.9 107.7 161.6 269.3 52400
+0.25 379.2 94.8 142.2 237.0 120800
+0.10 344.7 34.5 155.1 189.6 178000
+0.10 327.5 32.8 147.4 180.1 892500
+0.02 555.0 11.1 272.0 283.1 9400
+0.02 555.0 11.1 272.0 283.1 9200
+0.02 555.0 11.1 272.0 283.1 9800
+0.02 551.6 11.0 270.3 281.3 9700
+0.02 537.8 10.8 263.5 274.3 9700
+0.02 517.1 10.3 253.4 263.7 16200
+0.02 482.6 9.7 236.5 246.1 18800
+0.02 344.7 6.9 168.9 175.8 48000
+0.02 310.3 6.2 152.0 158.2 99400
+0.02 310.3 6.2 152.0 158.2 160600
+0.02 275.8 5.5 135.1 140.7 355600
+0.02 275.8 5.5 135.1 140.7 9705800
+-0.60 517.1 -310.3 413.7 103.4 11600
+-0.60 517.1 -310.3 413.7 103.4 8800
+-0.60 517.1 -310.3 413.7 103.4 9400
+-0.60 448.2 -268.9 358.5 89.6 11000
+-0.60 413.7 -248.2 330.9 82.7 16600
+-0.60 413.7 -248.2 330.9 82.7 19100
+-0.60 413.7 -248.2 330.9 82.7 19400
+-0.60 379.2 -227.5 303.4 75.8 24600
+-0.60 296.5 -177.9 237.2 59.3 63800
+-0.60 275.8 -165.5 220.6 55.2 152800
+-0.60 275.8 -165.5 220.6 55.2 168700
+-0.60 258.6 -155.1 206.8 51.7 254800
+-0.80 344.7 -275.8 310.3 34.5 15300
+-0.80 272.3 -217.9 245.1 27.2 58100
+-0.80 241.3 -193.1 217.2 24.1 154700
+-1.00 344.7 -344.7 344.7 0.0 13000
+-1.00 275.8 -275.8 275.8 0.0 55400
+-1.00 275.8 -275.8 275.8 0.0 66800
+-1.00 241.3 -241.3 241.3 0.0 110600
+-1.00 206.8 -206.8 206.8 0.0 263000
+-1.00 206.8 -206.8 206.8 0.0 478000
+-1.00 206.8 -206.8 206.8 0.0 3137000
+-1.00 189.6 -189.6 189.6 0.0 1205000
+-1.00 172.4 -172.4 172.4 0.0 9497600
+"""
+
+columns = ["R", "sigma_max", "sigma_min",
+           "sigma_a", "sigma_m", "N_f"]
+
+df = pd.read_csv(
+    StringIO(data),
+    sep=r"\s+",
+    names=columns
+)
+
+# ==========================================================
+# 2. 그래프 공통 설정
+# ==========================================================
+plt.rcParams.update({
+    "font.size": 15,
+    "axes.labelsize": 20,
+    "axes.titlesize": 19,
+    "xtick.labelsize": 16,
+    "ytick.labelsize": 16,
+    "legend.fontsize": 13,
+    "axes.linewidth": 1.2
+})
+
+r_values = sorted(df["R"].unique(), reverse=True)
+
+colors = plt.get_cmap("tab10").colors
+markers = ["o", "s", "^", "D", "v", "P", "X", "<", ">"]
+
+# 동일한 R은 두 그래프에서 같은 색상과 기호 사용
+styles = {
+    r: (colors[i], markers[i])
+    for i, r in enumerate(r_values)
+}
+
+# ==========================================================
+# 3. S-N 선도 작성 함수
+# ==========================================================
+def plot_sn(column, ylabel, title, filename, ylim, yticks):
+    fig, ax = plt.subplots(figsize=(10, 7), dpi=150)
+
+    for r in r_values:
+        group = df[df["R"] == r]
+        color, marker = styles[r]
+
+        ax.scatter(
+            group["N_f"],
+            group[column],
+            s=75,
+            marker=marker,
+            facecolors="none",
+            edgecolors=color,
+            linewidths=1.7,
+            label=fr"$R={r:.2f}$",
+            zorder=3
+        )
+
+    # 양대수 좌표
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+
+    ax.set_xlim(5e3, 2e7)
+    ax.set_ylim(*ylim)
+
+    ax.set_xticks([1e4, 1e5, 1e6, 1e7])
+    ax.set_yticks(yticks)
+
+    # y축 응력을 100, 200 등 일반 숫자로 표시
+    ax.yaxis.set_major_formatter(ScalarFormatter())
+    ax.yaxis.set_minor_formatter(NullFormatter())
+
+    ax.xaxis.set_minor_locator(
+        LogLocator(base=10, subs=np.arange(2, 10))
+    )
+
+    ax.set_xlabel(r"Cycles to failure, $N_f$ (cycles)")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title, pad=15)
+
+    ax.grid(which="major", linestyle="-", alpha=0.30)
+    ax.grid(which="minor", linestyle=":", alpha=0.15)
+
+    ax.tick_params(
+        which="major", direction="in",
+        length=7, width=1.2
+    )
+    ax.tick_params(
+        which="minor", direction="in",
+        length=4
+    )
+
+    # 範例放在圖外，避免遮擋資料
+    ax.legend(
+        title="Stress ratio",
+        title_fontsize=14,
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        borderaxespad=0
+    )
+
+    fig.tight_layout()
+
+    # 고해상도 그림 및 벡터 PDF 저장
+    fig.savefig(f"{filename}.png", dpi=300, bbox_inches="tight")
+    fig.savefig(f"{filename}.pdf", bbox_inches="tight")
+
+    plt.show()
+
+# ==========================================================
+# 4. 응력진폭–수명 선도
+# ==========================================================
+plot_sn(
+    column="sigma_a",
+    ylabel=r"Stress amplitude, $\sigma_a$ (MPa)",
+    title="7075-T6 Aluminum Sheet: Stress Amplitude–Life",
+    filename="7075T6_sigma_a_Nf",
+    ylim=(80, 500),
+    yticks=[80, 100, 150, 200, 300, 400, 500]
+)
+
+# ==========================================================
+# 5. 최대응력–수명 선도
+# ==========================================================
+plot_sn(
+    column="sigma_max",
+    ylabel=r"Maximum stress, $\sigma_{\max}$ (MPa)",
+    title="7075-T6 Aluminum Sheet: Maximum Stress–Life",
+    filename="7075T6_sigma_max_Nf",
+    ylim=(150, 650),
+    yticks=[150, 200, 300, 400, 500, 600]
+)
