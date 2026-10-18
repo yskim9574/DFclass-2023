@@ -158,7 +158,7 @@ def plot_sn(column, ylabel, title, filename, ylim, yticks):
         length=4
     )
 
-    # 範例放在圖外，避免遮擋資料
+   
     ax.legend(
         title="Stress ratio",
         title_fontsize=14,
