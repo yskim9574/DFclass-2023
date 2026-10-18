@@ -3,8 +3,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter, NullFormatter
+from scipy import stats
 
-OUT = Path('/content')   # Colab working folder
+OUT = Path('/content') if Path('/content').exists() else Path.cwd()   # Colab working folder
 
 # 75S-T6 (7075-T6) sheet, axial-load fatigue: H.J. Grover, S.M. Bishop, L.R. Jackson,
 # NACA TN 2324 (1951), Table 3. Only specimens "Failed in critical section" are included.
@@ -32,16 +33,36 @@ DATA = [
     (-1.00, 172.4, -172.4, 172.4, 9497600),
 ]
 
-SIGMA_U = 568.8   # tensile strength: 82,500 psi (NACA TN 2324, Table 1)
-GAMMA = 0.39      # Walker exponent
+SIGMA_U = 568.8    # tensile strength: 82,500 psi (NACA TN 2324, Table 1)
+GAMMA = 0.39       # Walker exponent
+FIT_NMAX = 2e6     # Basquin fit uses finite-life points only (N_f <= FIT_NMAX); longer lives approach the fatigue limit
+CONF = 0.95        # confidence level of the prediction band
 
 df = pd.DataFrame(DATA, columns=['R', 'sigma_max', 'sigma_min', 'sigma_a', 'N_f'])
 df['sigma_m'] = (df.sigma_max + df.sigma_min) / 2
-df.to_csv(OUT / 'input_data.csv', index=False)
 assert (df.sigma_m < SIGMA_U).all()
 df['Goodman'] = df.sigma_a / (1 - df.sigma_m / SIGMA_U)
 df['Walker'] = df.sigma_max**(1 - GAMMA) * df.sigma_a**GAMMA
 df.to_csv(OUT / 'equivalent_stress_data.csv', index=False)
+
+
+def basquin_fit(N, s):
+    """Least-squares fit of log10(s) = log10(sf) + b*log10(2N)  ->  s = sf*(2N)^b."""
+    x, y = np.log10(2 * N), np.log10(s)
+    n = len(x)
+    b, a = np.polyfit(x, y, 1)
+    res = y - (a + b * x)
+    sd = np.sqrt(np.sum(res**2) / (n - 2))              # standard error of estimate (log10 stress)
+    r2 = 1 - np.sum(res**2) / np.sum((y - y.mean())**2)
+    t = stats.t.ppf(0.5 + CONF / 2, n - 2)
+    xm, sxx = x.mean(), np.sum((x - x.mean())**2)
+    def band(Nq):                                          # prediction interval for a new specimen
+        xq = np.log10(2 * np.asarray(Nq))
+        half = t * sd * np.sqrt(1 + 1 / n + (xq - xm)**2 / sxx)
+        yq = a + b * xq
+        return 10**yq, 10**(yq - half), 10**(yq + half)
+    return dict(sf=10**a, b=b, sd=sd, r2=r2, n=n, t=t, band=band)
+
 
 colors = ['#0072B2', '#888888', '#D55E00', '#AA4499', '#009E73', '#CC79A7', '#E69F00', '#44AACC', '#332288']
 markers = ['o', 's', '^', 'D', 'v', 'P', 'X', '<', '>']
@@ -49,13 +70,33 @@ rvals = sorted(df.R.unique(), reverse=True)
 plt.rcParams.update({'font.size': 14, 'axes.labelsize': 19, 'xtick.labelsize': 15, 'ytick.labelsize': 15,
                      'axes.linewidth': 1.2, 'pdf.fonttype': 42})
 
+summary = []
 for method in ['Goodman', 'Walker']:
+    use = df.N_f <= FIT_NMAX
+    fit = basquin_fit(df.N_f[use].values, df[method][use].values)
+    summary.append((method, fit['sf'], fit['b'], fit['r2'], fit['sd'], 10**(fit['t'] * fit['sd']), fit['n']))
+
     fig, ax = plt.subplots(figsize=(10, 7.2))
-    fig.subplots_adjust(left=.14, right=.78, bottom=.14, top=.87)
+    fig.subplots_adjust(left=.14, right=.74, bottom=.14, top=.87)
     for r, c, m in zip(rvals, colors, markers):
         g = df[df.R == r]
         ax.scatter(g.N_f, g[method], s=65, marker=m, facecolors='none', edgecolors=c,
                    linewidths=1.6, label=f'R = {r:.2f}', zorder=3)
+    Nq = np.logspace(np.log10(5e3), np.log10(FIT_NMAX), 200)
+    mid, lo, hi = fit['band'](Nq)
+    ax.fill_between(Nq, lo, hi, color='0.6', alpha=0.18, lw=0, zorder=1)
+    ax.plot(Nq, mid, 'k-', lw=2.2, zorder=2, label='Basquin fit')
+    ax.plot(Nq, lo, 'k--', lw=1.3, zorder=2, label=f'{CONF*100:.0f}% prediction band')
+    ax.plot(Nq, hi, 'k--', lw=1.3, zorder=2)
+    ax.axvline(FIT_NMAX, color='0.5', ls=':', lw=1.2)
+    ax.text(FIT_NMAX * 1.08, 128, 'fit limit', color='0.4', fontsize=11)
+    ax.text(0.03, 0.04,
+            rf"$\sigma_{{a,eq}}={fit['sf']:.0f}\,(2N_f)^{{{fit['b']:.4f}}}$" + "\n"
+            + rf"$R^2$ = {fit['r2']:.3f},  $s$ = {fit['sd']:.4f} (log$_{{10}}$),  n = {fit['n']}" + "\n"
+            + rf"scatter factor (stress) = $\times/\div$ {10**(fit['t']*fit['sd']):.2f}",
+            transform=ax.transAxes, fontsize=12, va='bottom',
+            bbox=dict(boxstyle='round', fc='white', ec='0.8'))
+
     ax.set_xscale('log'); ax.set_yscale('log')
     ax.set_xlim(5e3, 2e7); ax.set_ylim(120, 650)
     ax.set_xticks([1e4, 1e5, 1e6, 1e7]); ax.set_yticks([120, 150, 200, 300, 400, 500, 600])
@@ -68,19 +109,25 @@ for method in ['Goodman', 'Walker']:
     ax.set_title(title + '\n' + note, fontsize=16, pad=12)
     ax.grid(which='major', alpha=.25); ax.grid(which='minor', alpha=.12, ls=':')
     ax.tick_params(which='both', direction='in', top=True, right=True)
-    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=12, frameon=False)
+    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=11.5, frameon=False)
     for ext in ['png', 'pdf', 'svg']:
-        fig.savefig(OUT / f'7075T6_{method}_equivalent_SN.{ext}', dpi=300)
-    plt.show()          # show the figure in Colab
+        fig.savefig(OUT / f'7075T6_{method}_equivalent_SN_basquin.{ext}', dpi=300)
+    plt.show()
 
-print(df.groupby('R')[['Goodman', 'Walker']].agg(['min', 'max']).round(2))
+tab = pd.DataFrame(summary, columns=['method', "sigma_f' [MPa]", 'b', 'R^2', 's (log10)',
+                                     f'scatter factor ({CONF*100:.0f}%)', 'n'])
+tab.to_csv(OUT / 'basquin_fit_summary.csv', index=False)
+print(tab.round(4).to_string(index=False))
 
-# Download all result files as one zip (optional)
-import shutil
-from google.colab import files
-res = OUT / 'results'
-res.mkdir(exist_ok=True)
-for f in OUT.glob('7075T6_*'): shutil.copy(f, res)
-for f in ['input_data.csv', 'equivalent_stress_data.csv']: shutil.copy(OUT / f, res)
-shutil.make_archive(str(OUT / '7075T6_results'), 'zip', res)
-files.download(str(OUT / '7075T6_results.zip'))
+# Download all result files as one zip (Colab only)
+try:
+    import shutil
+    from google.colab import files
+    res = OUT / 'results'
+    res.mkdir(exist_ok=True)
+    for f in OUT.glob('7075T6_*'): shutil.copy(f, res)
+    for f in ['equivalent_stress_data.csv', 'basquin_fit_summary.csv']: shutil.copy(OUT / f, res)
+    shutil.make_archive(str(OUT / '7075T6_results'), 'zip', res)
+    files.download(str(OUT / '7075T6_results.zip'))
+except ImportError:
+    pass
