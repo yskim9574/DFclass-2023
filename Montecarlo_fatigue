@@ -1,0 +1,140 @@
+from pathlib import Path
+import numpy as np
+import matplotlib.pyplot as plt
+
+OUT = Path('/content') if Path('/content').exists() else Path.cwd()   # Colab working folder
+
+# Edge crack in a steel plate under constant-amplitude loading (R = 0, so delta_sigma = sigma_max)
+#   Paris law: da/dN = C (delta_K)^m,  delta_K = Y delta_sigma sqrt(pi a)
+#   Limit state after N_S cycles: g = K_IC - Y sigma_max sqrt(pi a_N)   (failure when g < 0)
+Y, m = 1.12, 3.0          # geometry factor (small edge crack), Paris exponent (fixed)
+N_S = 1.0e5               # required service life [cycles]
+N_MC = 10**6              # number of Monte Carlo samples
+SEED = 2026
+
+# Random variables: (distribution, mean, standard deviation)
+VARS = {
+    'sigma': ('normal',    150.0,   15.0),        # maximum stress [MPa]
+    'a0':    ('lognormal', 1.0e-3,  0.5e-3),      # initial crack depth [m]
+    'C':     ('lognormal', 6.9e-12, 0.3*6.9e-12), # Paris coefficient [m/cycle, MPa sqrt(m)]
+    'KIC':   ('normal',    50.0,    5.0),         # fracture toughness [MPa sqrt(m)]
+}
+
+
+def from_z(name, z):
+    """Inverse transform: standard normal z -> sample of the variable."""
+    kind, mu, sd = VARS[name]
+    if kind == 'normal':
+        return mu + sd * z
+    zeta = np.sqrt(np.log(1 + (sd / mu)**2))      # lognormal: ln X ~ N(lam, zeta^2)
+    lam = np.log(mu) - zeta**2 / 2
+    return np.exp(lam + zeta * z)
+
+
+def crack_after(a0, C, sigma, N):
+    """Closed-form Paris integration (constant Y, m != 2). Returns inf if the crack runs away."""
+    p = 1 - m / 2
+    rhs = a0**p - (m / 2 - 1) * C * (Y * sigma * np.sqrt(np.pi))**m * N
+    return np.where(rhs > 0, np.abs(rhs)**(1 / p), np.inf)
+
+
+def limit_state(sigma, a0, C, KIC, N=N_S):
+    aN = crack_after(a0, C, sigma, N)
+    KI = Y * sigma * np.sqrt(np.pi * aN)
+    return KIC - KI, aN, KI
+
+
+# ---- Step 0: deterministic check with mean values ----
+g0, aN0, KI0 = limit_state(*(np.array(VARS[k][1]) for k in VARS))
+print(f'Mean values: a_N = {aN0*1e3:.2f} mm, K_I = {KI0:.1f}, g = {g0:.1f} MPa sqrt(m)')
+
+# ---- Hand-calculation table: five samples from given standard normal numbers ----
+Z_HAND = np.array([[ 0.5, -0.3,  0.2,  0.8],
+                   [-1.1,  0.9, -0.4, -0.2],
+                   [ 1.3,  1.9,  1.2, -1.4],
+                   [ 0.2,  1.2,  0.6,  0.3],
+                   [-0.6, -1.5, -0.9,  1.1]])
+x = {k: from_z(k, Z_HAND[:, i]) for i, k in enumerate(VARS)}
+g, aN, KI = limit_state(x['sigma'], x['a0'], x['C'], x['KIC'])
+print('\n  i  sigma[MPa]  a0[mm]   C[1e-12]  KIC    a_N[mm]   K_I     g     result')
+for i in range(len(g)):
+    print(f"{i+1:3d} {x['sigma'][i]:9.1f} {x['a0'][i]*1e3:8.3f} {x['C'][i]*1e12:9.2f}"
+          f" {x['KIC'][i]:6.1f} {aN[i]*1e3:9.2f} {KI[i]:7.1f} {g[i]:6.1f}   {'FAIL' if g[i] < 0 else 'safe'}")
+
+# ---- Steps (2)-(6): full Monte Carlo ----
+rng = np.random.default_rng(SEED)
+s = {k: from_z(k, rng.standard_normal(N_MC)) for k in VARS}
+g, aN, KI = limit_state(s['sigma'], s['a0'], s['C'], s['KIC'])
+fail = g < 0
+Nf = fail.sum()
+Pf = Nf / N_MC
+cov = np.sqrt((1 - Pf) / (N_MC * Pf))
+print(f'\nN = {N_MC:,}, N_f = {Nf:,}, P_f = {Pf:.4e}, COV = {cov:.3f}, '
+      f'95% CI = [{Pf*(1-1.96*cov):.4e}, {Pf*(1+1.96*cov):.4e}]')
+print(f'Run-away cracks (a_N = inf): {np.isinf(aN).sum():,}')
+print('Mean of failed samples vs all:')
+for k in VARS:
+    sc = 1e3 if k == 'a0' else 1e12 if k == 'C' else 1
+    print(f'  {k:6s} all {s[k].mean()*sc:8.3f}   failed {s[k][fail].mean()*sc:8.3f}')
+
+# ---- Figures ----
+plt.rcParams.update({'font.size': 14, 'axes.labelsize': 17, 'xtick.labelsize': 14, 'ytick.labelsize': 14})
+NAVY, RED, GREY = '#1F3A68', '#C0392B', '0.45'
+
+# (a) histogram of g
+fig, ax = plt.subplots(figsize=(9, 6))
+gf = np.clip(np.where(np.isfinite(g), g, -1e9), -59.9, None)   # g <= -60 and run-away cracks share the first bin
+bins = np.arange(-60, 52, 2)
+ax.hist(gf[gf >= 0], bins=bins, color=NAVY, alpha=.85, ec='white', lw=.5, label='Safe ($g \\geq 0$)')
+ax.hist(gf[gf < 0], bins=bins, color=RED, alpha=.9, ec='white', lw=.5, label='Failure ($g < 0$)')
+ax.axvline(0, color='k', lw=1.5)
+ax.set_yscale('log')
+ax.set_xlabel(r'Limit state $g = K_{IC} - Y\sigma\sqrt{\pi a_N}$  (MPa$\sqrt{\mathrm{m}}$)')
+ax.set_ylabel('Number of samples')
+ax.set_title(rf'Distribution of $g$ after $N_S$ = {N_S:,.0f} cycles ($N$ = {N_MC:,})', fontsize=15)
+ax.text(0.03, 0.95, rf'$N_f$ = {Nf:,}' + '\n' + rf'$P_f \approx N_f/N$ = {Pf:.4f}',
+        transform=ax.transAxes, va='top', fontsize=14, bbox=dict(boxstyle='round', fc='white', ec='0.8'))
+ax.text(-59, ax.get_ylim()[0] * 3, r'$g \leq -60$, incl.' + '\nrun-away cracks\n' + r'($a_N\to\infty$)', color=RED, fontsize=11, va='bottom')
+ax.legend(loc='upper left', bbox_to_anchor=(0, 0.80), frameon=False)
+ax.grid(alpha=.25)
+fig.tight_layout()
+fig.savefig(OUT / 'MC_Pf_histogram.png', dpi=300)
+
+# (b) convergence of the estimate
+n = np.arange(1, N_MC + 1)
+run = np.cumsum(fail) / n
+idx = np.unique(np.logspace(1, np.log10(N_MC), 400).astype(int)) - 1
+pr, nr = run[idx], n[idx]
+half = 1.96 * np.sqrt(np.maximum(pr * (1 - pr), 1e-30) / nr)
+fig, ax = plt.subplots(figsize=(9, 6))
+ax.fill_between(nr, np.maximum(pr - half, 0), pr + half, color=NAVY, alpha=.15, lw=0, label='95% confidence band')
+ax.plot(nr, pr, color=NAVY, lw=2, label=r'Running estimate $N_f/N$')
+ax.axhline(Pf, color=RED, ls='--', lw=1.5, label=rf'Final $P_f$ = {Pf:.4f}')
+ax.set_xscale('log')
+ax.set_ylim(0, 0.05)
+ax.set_xlabel('Number of samples, $N$')
+ax.set_ylabel('Estimated failure probability, $P_f$')
+ax.set_title('Convergence of the Monte Carlo estimate', fontsize=15)
+ax.legend(loc='upper right', frameon=False)
+ax.grid(which='both', alpha=.2)
+fig.tight_layout()
+fig.savefig(OUT / 'MC_Pf_convergence.png', dpi=300)
+
+# (c) P_f versus service life
+Ns_list = np.linspace(2e4, 2.5e5, 24)
+Pf_list = [(limit_state(s['sigma'], s['a0'], s['C'], s['KIC'], N)[0] < 0).mean() for N in Ns_list]
+fig, ax = plt.subplots(figsize=(9, 6))
+ok = np.array(Pf_list) > 0                    # P_f = 0 cannot be drawn on a log axis
+ax.semilogy(Ns_list[ok], np.array(Pf_list)[ok], 'o-', color=NAVY, lw=2, ms=7)
+ax.axvline(N_S, color=RED, ls='--', lw=1.5)
+ax.text(N_S * 1.03, 2e-6, rf'$N_S$ = {N_S:,.0f}', color=RED, fontsize=13)
+ax.set_xlabel('Service life, $N_S$ (cycles)')
+ax.set_ylabel('Failure probability, $P_f$')
+ax.set_ylim(1e-6, 1)
+ax.set_title('Failure probability increases with service life', fontsize=15)
+ax.grid(which='both', alpha=.2)
+fig.tight_layout()
+fig.savefig(OUT / 'MC_Pf_vs_life.png', dpi=300)
+for N, P in zip(Ns_list[::3], Pf_list[::3]):
+    print(f'N_S = {N:9.0f}  P_f = {P:.2e}')
+plt.show()
