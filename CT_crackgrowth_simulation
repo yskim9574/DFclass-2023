@@ -1,0 +1,310 @@
+"""CT specimen: plastic zone evolution during fatigue crack growth by node release (CalculiX).
+
+Half model (symmetry about the crack plane), 2D plane stress, kinematic hardening steel.
+Each load cycle: P_min -> P_max -> P_min, then the crack-tip node on the ligament is released
+at P_min so that the crack grows by one element (DA) per cycle from A0 to A1.
+
+Runs locally (set CCX to the ccx executable) or in Google Colab (calculix-ccx is installed by apt).
+Units: mm, N, MPa.
+"""
+import os
+import re
+import sys
+import shutil
+import subprocess
+from pathlib import Path
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import font_manager as fm
+from matplotlib.collections import PolyCollection
+from matplotlib.colors import LogNorm
+
+COLAB = Path('/content').exists()
+
+# ---------------- parameters ----------------
+W, B = 10.0, 2.5                 # CT width (load line to back face) and thickness [mm]
+A0, A1, DA = 3.0, 4.0, 0.025     # initial / final crack length and growth per cycle [mm]
+E, NU = 200e3, 0.3               # [MPa]
+SY, H_KIN = 350.0, 2000.0        # yield stress and linear kinematic hardening modulus [MPa]
+KMAX0, R = 12.0, 0.1             # K_max at a = A0 [MPa sqrt(m)] and load ratio
+ELTYPE = 'CPS4'                  # 'CPS4' plane stress, 'CPE4' plane strain
+H_FINE = DA                      # element size along the crack path [mm]
+WORK = Path('/content/ct_run') if COLAB else Path(__file__).resolve().parent / 'run'
+CCX = os.environ.get('CCX', 'ccx')
+PEEQ_MIN = 1e-5                  # threshold for "plastically deformed"
+
+
+def ccx_executable():
+    exe = shutil.which(CCX) or (CCX if Path(CCX).exists() else None)
+    if exe is None and COLAB:
+        subprocess.run('apt-get -qq update && apt-get -qq install -y calculix-ccx', shell=True, check=True)
+        exe = shutil.which('ccx')
+    if exe is None:
+        sys.exit('CalculiX (ccx) not found: set the CCX environment variable to the ccx executable')
+    return exe
+
+
+def korean_font():
+    names = {f.name for f in fm.fontManager.ttflist}
+    for n in ('Malgun Gothic', 'NanumGothic', 'AppleGothic'):
+        if n in names:
+            return n
+    if COLAB:
+        subprocess.run(['apt-get', '-qq', 'install', '-y', 'fonts-nanum'], check=False)
+        for f in Path('/usr/share/fonts/truetype/nanum').glob('*.ttf'):
+            fm.fontManager.addfont(str(f))
+        return 'NanumGothic'
+    return 'DejaVu Sans'
+
+
+def k_ct(P, a):
+    """ASTM E647 compact specimen, K in MPa sqrt(m) for P [N], a, W, B [mm]."""
+    al = a / W
+    f = (2 + al) / (1 - al)**1.5 * (0.886 + 4.64 * al - 13.32 * al**2 + 14.72 * al**3 - 5.6 * al**4)
+    return P / (B * np.sqrt(W)) * f / np.sqrt(1000.0)
+
+
+PMAX = KMAX0 / k_ct(1.0, A0)
+PMIN = R * PMAX
+TIPS = A0 + DA * np.arange(int(round((A1 - A0) / DA)) + 1)       # crack-tip positions
+
+
+# ---------------- mesh ----------------
+def graded(x0, x1, h0, ratio=1.2, hmax=0.6):
+    """Points from x0 to x1, first spacing h0 at x0 growing by `ratio` up to hmax."""
+    L, s, h = abs(x1 - x0), [], h0
+    while sum(s) + h < L - 1e-9:
+        s.append(h)
+        h = min(h * ratio, hmax)
+    rest = L - sum(s)
+    if s and rest < 0.5 * s[-1]:
+        s[-1] += rest
+    else:
+        s.append(rest)
+    return x0 + np.sign(x1 - x0) * np.cumsum([0.0] + s)
+
+
+def uniform(x0, x1, h):
+    n = max(1, int(round((x1 - x0) / h)))
+    return np.linspace(x0, x1, n + 1)
+
+
+XF0, XF1 = A0 - 0.3, A1 + 0.9                 # fine zone along the crack path
+YF1, YPIN = 0.8, 0.275 * W                     # fine zone height, pin (load point) height
+xs = np.unique(np.round(np.r_[uniform(-0.25 * W, 0.0, 0.5), graded(XF0, 0.0, H_FINE)[::-1],
+                              uniform(XF0, XF1, H_FINE), graded(XF1, W, H_FINE)], 9))
+ys = np.unique(np.round(np.r_[uniform(0.0, YF1, H_FINE), graded(YF1, YPIN, H_FINE, hmax=0.4),
+                              uniform(YPIN, 0.6 * W, 0.4)], 9))
+NX, NY = len(xs), len(ys)
+X, Y = np.meshgrid(xs, ys)
+nodes = np.c_[X.ravel(), Y.ravel()]                       # node id = index + 1
+nid = lambda i, j: j * NX + i + 1
+elems = np.array([[nid(i, j), nid(i + 1, j), nid(i + 1, j + 1), nid(i, j + 1)]
+                  for j in range(NY - 1) for i in range(NX - 1)])
+cent = nodes[elems - 1].mean(axis=1)
+pin_node = nid(int(np.argmin(abs(xs))), int(np.argmin(abs(ys - YPIN))))
+near_pin = np.hypot(cent[:, 0], cent[:, 1] - YPIN) < 0.8              # kept elastic (no pin-hole yielding)
+zone = (cent[:, 0] > XF0) & (cent[:, 0] < XF1) & (cent[:, 1] < YF1)   # elements written to the .dat file
+lig = lambda a: [nid(i, 0) for i in range(NX) if xs[i] >= a - 1e-9]   # symmetry nodes ahead of the tip
+face = [nid(i, 0) for i in range(NX) if 0.0 < A0 - xs[i] < 1.0]       # crack-face nodes for the K check
+
+
+def write_sets(f):
+    def block(name, kind, ids):
+        f.write(f'*{kind}, {kind[0]}SET={name}\n')
+        for k in range(0, len(ids), 12):
+            f.write(', '.join(str(v) for v in ids[k:k + 12]) + ',\n')
+    f.write('*NODE, NSET=NALL\n')
+    for k, (x, y) in enumerate(nodes, 1):
+        f.write(f'{k}, {x:.6f}, {y:.6f}\n')
+    for name, mask in [('EPLAS', ~near_pin), ('EELAS', near_pin)]:
+        f.write(f'*ELEMENT, TYPE={ELTYPE}, ELSET={name}\n')
+        for k in np.flatnonzero(mask):
+            f.write(f'{k + 1}, ' + ', '.join(map(str, elems[k])) + '\n')
+    block('EZONE', 'ELSET', list(np.flatnonzero(zone) + 1))
+    block('NFACE', 'NSET', face)
+    block('NPIN', 'NSET', [pin_node])
+    for k, a in enumerate(TIPS):
+        block(f'NLIG{k}', 'NSET', lig(a))
+
+
+def write_model(f, plastic=True):
+    write_sets(f)
+    f.write(f'*MATERIAL, NAME=STEEL\n*ELASTIC\n{E}, {NU}\n')
+    if plastic:
+        f.write(f'*PLASTIC, HARDENING=KINEMATIC\n{SY}, 0.0\n{SY + H_KIN * 0.1}, 0.1\n')
+    f.write(f'*MATERIAL, NAME=STEEL_EL\n*ELASTIC\n{E}, {NU}\n')
+    f.write(f'*SOLID SECTION, ELSET=EPLAS, MATERIAL=STEEL\n{B}\n')
+    f.write(f'*SOLID SECTION, ELSET=EELAS, MATERIAL=STEEL_EL\n{B}\n')
+    f.write('*TIME POINTS, NAME=TEND\n1.0\n')
+
+
+def step(f, load, lig_set, out, incr='0.2, 1.0, 1e-6, 0.5'):
+    f.write(f'*STEP, INC=1000\n*STATIC\n{incr}\n')
+    f.write(f'*BOUNDARY, OP=NEW\n{lig_set}, 2, 2\nNPIN, 1, 1\n')
+    f.write(f'*CLOAD\n{pin_node}, 2, {load:.6f}\n')
+    for line in out:
+        f.write(line + '\n')
+    f.write('*END STEP\n')
+
+
+def write_elastic(path, a_idx):
+    with open(path, 'w') as f:
+        write_model(f, plastic=False)
+        step(f, PMAX, f'NLIG{a_idx}', ['*NODE PRINT, NSET=NFACE, TIME POINTS=TEND\nU'], '1.0, 1.0')
+
+
+def write_growth(path):
+    out = ['*EL PRINT, ELSET=EZONE, TIME POINTS=TEND\nPEEQ']
+    with open(path, 'w') as f:
+        write_model(f)
+        for k in range(len(TIPS)):
+            step(f, PMAX, f'NLIG{k}', out)               # load up
+            step(f, PMIN, f'NLIG{k}', out)               # unload
+            if k + 1 < len(TIPS):
+                step(f, PMIN, f'NLIG{k + 1}', [], '0.25, 1.0, 1e-6, 1.0')   # release the tip node
+
+
+# ---------------- run and read ----------------
+def run(exe, job):
+    print(f'running {job} ...', flush=True)
+    r = subprocess.run([exe, '-i', job], cwd=WORK, capture_output=True, text=True)
+    log = (WORK / f'{job}.log')
+    log.write_text(r.stdout + r.stderr)
+    if r.returncode != 0 or 'ERROR' in r.stdout:
+        sys.exit(f'ccx failed for {job}; see {log}')
+
+
+def read_dat(path):
+    """Blocks of the .dat file as a list of (time, {id: [values]})."""
+    blocks, cur = [], None
+    for line in open(path):
+        m = re.search(r'and time\s+([-+0-9.Ee]+)', line)
+        if m:
+            cur = {}
+            blocks.append((float(m.group(1)), cur))
+            continue
+        t = line.split()
+        if cur is not None and len(t) >= 2:
+            try:
+                cur.setdefault(int(t[0]), []).append([float(v) for v in t[1:]])
+            except ValueError:
+                pass
+    return blocks
+
+
+def k_from_opening(blocks, a):
+    """Displacement extrapolation of the crack-face opening behind the tip."""
+    Ep = E if ELTYPE == 'CPS4' else E / (1 - NU**2)
+    disp = blocks[-1][1]
+    r = np.array([a - nodes[n - 1, 0] for n in disp])
+    v = np.array([disp[n][0][1] for n in disp])
+    keep = (r > 2 * H_FINE) & (r < 0.6)
+    kr = Ep * v[keep] / 4 * np.sqrt(2 * np.pi / r[keep]) / np.sqrt(1000.0)
+    return np.polyval(np.polyfit(r[keep], kr, 1), 0.0)
+
+
+def main():
+    WORK.mkdir(parents=True, exist_ok=True)
+    exe = ccx_executable()
+    print(f'mesh: {len(nodes)} nodes, {len(elems)} elements;  P_max = {PMAX:.1f} N, P_min = {PMIN:.1f} N')
+
+    # 1) verification: elastic K at a = A0 against the ASTM E647 formula
+    write_elastic(WORK / 'ct_elastic.inp', 0)
+    run(exe, 'ct_elastic')
+    k_fe, k_astm = k_from_opening(read_dat(WORK / 'ct_elastic.dat'), A0), k_ct(PMAX, A0)
+    print(f'K check at a = {A0} mm: FE {k_fe:.2f}, ASTM {k_astm:.2f} MPa sqrt(m) ({(k_fe / k_astm - 1) * 100:+.1f} %)')
+
+    # 2) crack growth by node release
+    write_growth(WORK / 'ct_growth.inp')
+    run(exe, 'ct_growth')
+    blocks = [b for b in read_dat(WORK / 'ct_growth.dat') if b[1]]
+    peeq = [{e: np.mean(np.array(v)[:, -1]) for e, v in blk.items()} for _, blk in blocks]
+    np.save(WORK / 'peeq_frames.npy', [np.array([p.get(e + 1, 0.0) for e in np.flatnonzero(zone)]) for p in peeq])
+    post(peeq)
+
+
+# ---------------- post-processing ----------------
+def post(peeq):
+    plt.rcParams.update({'font.family': korean_font(), 'mathtext.fontset': 'stix',
+                         'axes.unicode_minus': False, 'font.size': 12})
+    zid = np.flatnonzero(zone)
+    poly = nodes[elems[zid] - 1]
+    pk = [np.array([p.get(e + 1, 0.0) for e in zid]) for p in peeq]   # frames: max, min, max, min, ...
+    pmax, pmin = pk[0::2], pk[1::2]
+    n = min(len(pmax), len(TIPS))
+    print(f'{n} load cycles read (crack {TIPS[0]:.3f} -> {TIPS[n - 1]:.3f} mm)')
+
+    # forward (active at P_max) and reversed (active during unloading) plastic zones ahead of the tip
+    rf, rr = [], []
+    on_line = poly[:, :, 1].min(axis=1) < 1e-9
+    xc = poly[:, :, 0].mean(axis=1)
+    for k in range(n):
+        prev = pmin[k - 1] if k > 0 else np.zeros_like(pmax[0])
+        fwd = (pmax[k] - prev > PEEQ_MIN) & on_line & (xc > TIPS[k])
+        rev = (pmin[k] - pmax[k] > PEEQ_MIN) & on_line & (xc > TIPS[k])
+        rf.append(xc[fwd].max() - TIPS[k] + H_FINE / 2 if fwd.any() else 0.0)
+        rr.append(xc[rev].max() - TIPS[k] + H_FINE / 2 if rev.any() else 0.0)
+    a = TIPS[:n]
+    kmax = k_ct(PMAX, a)
+    irwin = (kmax / SY)**2 / np.pi * 1000.0 * (1.0 if ELTYPE == 'CPS4' else 1 / 3)
+    irwin_rev = (kmax * (1 - R) / (2 * SY))**2 / np.pi * 1000.0 * (1.0 if ELTYPE == 'CPS4' else 1 / 3)
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.4))
+    ax.plot(a, rf, 'o-', color='#C0392B', ms=4, label='FE: 최대하중 소성역 $r_p$')
+    ax.plot(a, rr, 's-', color='#1F3A68', ms=4, label='FE: 역소성역 $r_{rev}$')
+    ax.plot(a, irwin, '--', color='#C0392B', label=r'Irwin $(1/\pi)(K_{max}/\sigma_Y)^2$')
+    ax.plot(a, irwin_rev, '--', color='#1F3A68', label=r'Irwin $(1/\pi)(\Delta K/2\sigma_Y)^2$')
+    ax.set_xlabel('균열길이 $a$ (mm)'); ax.set_ylabel('균열선 위 소성역 크기 (mm)')
+    ax.legend(fontsize=10); ax.grid(alpha=.3)
+    fig.tight_layout(); fig.savefig(WORK / 'plastic_zone_size.png', dpi=200)
+
+    # snapshots of accumulated plastic strain at P_max (mirrored about the crack plane)
+    picks = [k for k in np.linspace(0, n - 1, 5).round().astype(int)]
+    mir = poly.copy(); mir[:, :, 1] *= -1
+    norm = LogNorm(PEEQ_MIN, max(1e-3, max(p.max() for p in pmax)))
+    fig, axs = plt.subplots(len(picks), 1, figsize=(7.2, 2.0 * len(picks)), sharex=True)
+    for ax, k in zip(axs, picks):
+        c = np.clip(pmax[k], PEEQ_MIN, None)
+        for P in (poly, mir):
+            pc = PolyCollection(P, array=c, cmap='inferno_r', norm=norm, edgecolors='none')
+            ax.add_collection(pc)
+        ax.plot([XF0, TIPS[k]], [0, 0], color='k', lw=2)
+        ax.plot(TIPS[k], 0, 'v', color='#1E8C7E', ms=7)
+        ax.set_xlim(XF0, XF1); ax.set_ylim(-YF1, YF1); ax.set_aspect('equal')
+        ax.set_ylabel('y (mm)')
+        ax.text(0.01, 0.92, f'a = {TIPS[k]:.2f} mm, $K_{{max}}$ = {k_ct(PMAX, TIPS[k]):.1f} MPa√m',
+                transform=ax.transAxes, fontsize=10, va='top', bbox=dict(fc='white', ec='none', alpha=.8))
+    axs[-1].set_xlabel('x (mm, 하중선 기준)')
+    fig.colorbar(pc, ax=axs, label='누적 등가소성변형률 PEEQ', shrink=0.6)
+    fig.savefig(WORK / 'plastic_zone_snapshots.png', dpi=200)
+
+    # animation of the growing crack and its plastic wake
+    try:
+        from matplotlib.animation import FuncAnimation, PillowWriter
+        fig, ax = plt.subplots(figsize=(7.2, 3.0))
+        pcs = [PolyCollection(P, array=np.clip(pmax[0], PEEQ_MIN, None), cmap='inferno_r', norm=norm,
+                              edgecolors='none') for P in (poly, mir)]
+        for pc in pcs:
+            ax.add_collection(pc)
+        crack, = ax.plot([XF0, A0], [0, 0], color='k', lw=2)
+        title = ax.set_title('')
+        ax.set_xlim(XF0, XF1); ax.set_ylim(-YF1, YF1); ax.set_aspect('equal')
+        fig.colorbar(pcs[0], ax=ax, label='PEEQ', shrink=0.8)
+
+        def frame(k):
+            for pc in pcs:
+                pc.set_array(np.clip(pmax[k], PEEQ_MIN, None))
+            crack.set_data([XF0, TIPS[k]], [0, 0])
+            title.set_text(f'최대하중에서의 소성변형: a = {TIPS[k]:.3f} mm')
+            return pcs + [crack, title]
+        FuncAnimation(fig, frame, frames=n).save(WORK / 'plastic_zone.gif', writer=PillowWriter(fps=6), dpi=110)
+    except Exception as err:
+        print('animation skipped:', err)
+    print('results in', WORK)
+    if 'ipykernel' in sys.modules:
+        plt.show()
+
+
+if __name__ == '__main__':
+    main()
